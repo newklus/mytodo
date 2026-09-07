@@ -1,23 +1,30 @@
 import Link from "next/link";
 import { createProject, deleteProject } from "@/lib/actions/projects";
-import type { Project } from "@/lib/types";
+import PriorityColorPicker from "@/components/PriorityColorPicker";
+import TagColorPicker from "@/components/TagColorPicker";
+import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
+import type { Project, Tag } from "@/lib/types";
 
 type View = "today" | "upcoming" | "all" | "completed";
 
 const VIEW_LABELS: Record<View, string> = {
+  all: "전체",
   today: "오늘",
   upcoming: "예정",
-  all: "전체",
   completed: "완료",
 };
 
 export default function Sidebar({
   projects,
+  tags = [],
+  priorityColors = DEFAULT_PRIORITY_COLORS,
   activeView,
   activeProjectId,
   isReportPage = false,
 }: {
   projects: Project[];
+  tags?: Tag[];
+  priorityColors?: Record<number, string>;
   activeView?: View;
   activeProjectId?: string;
   isReportPage?: boolean;
@@ -100,6 +107,40 @@ export default function Sidebar({
           </button>
         </form>
       </div>
+
+      <details className="mt-auto">
+        <summary className="cursor-pointer select-none text-xs font-semibold uppercase text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+          ⚙ 설정
+        </summary>
+
+        <div className="mt-3 flex flex-col gap-4">
+          {tags.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase text-zinc-500">태그 색상</div>
+              <ul className="flex flex-col gap-1">
+                {tags.map((t) => (
+                  <li key={t.id} className="flex items-center gap-2 px-3 py-1 text-sm">
+                    <TagColorPicker tagId={t.id} color={t.color ?? "#999999"} />
+                    <span className="truncate text-zinc-600 dark:text-zinc-300">#{t.name}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase text-zinc-500">우선순위 색상</div>
+            <ul className="flex flex-col gap-1">
+              {[1, 2, 3, 4].map((p) => (
+                <li key={p} className="flex items-center gap-2 px-3 py-1 text-sm">
+                  <PriorityColorPicker priority={p} color={priorityColors[p] ?? DEFAULT_PRIORITY_COLORS[p]} />
+                  <span className="text-zinc-600 dark:text-zinc-300">P{p}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </details>
     </aside>
   );
 }

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import WeeklyReportBuilder from "@/components/WeeklyReportBuilder";
 import { formatWeekLabel, getWeekRange } from "@/lib/week";
+import { getPriorityColors } from "@/lib/priorityColors.server";
 
 export default async function ReportPage({
   searchParams,
@@ -19,6 +21,8 @@ export default async function ReportPage({
   nextWeek.setDate(nextWeek.getDate() + 7);
 
   const projects = await prisma.project.findMany({ orderBy: { createdAt: "asc" } });
+  const tags = await prisma.tag.findMany({ orderBy: { name: "asc" } });
+  const priorityColors = await getPriorityColors();
 
   const [completedTasks, progressTasks] = await Promise.all([
     prisma.task.findMany({
@@ -59,7 +63,7 @@ export default async function ReportPage({
 
   return (
     <div className="flex flex-1 min-h-0">
-      <Sidebar projects={projects} isReportPage />
+      <Sidebar projects={projects} tags={tags} priorityColors={priorityColors} isReportPage />
 
       <main className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-6">
         <div className="flex items-center justify-between">
@@ -86,6 +90,8 @@ export default async function ReportPage({
           progressCandidates={progressCandidates}
         />
       </main>
+
+      <QuickAddModal projects={projects} />
     </div>
   );
 }

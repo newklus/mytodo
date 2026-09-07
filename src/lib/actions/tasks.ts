@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
+import { randomColor } from "@/lib/colors";
 
 function parseDueDate(value: FormDataEntryValue | null): Date | null {
   if (!value || typeof value !== "string" || value.trim() === "") return null;
@@ -19,7 +20,7 @@ function tagsCreateInput(tagNames: string[]) {
     tag: {
       connectOrCreate: {
         where: { name },
-        create: { name },
+        create: { name, color: randomColor() },
       },
     },
   }));
@@ -133,5 +134,26 @@ export async function toggleTaskComplete(id: string, completed: boolean) {
 
 export async function deleteTask(id: string) {
   await prisma.task.delete({ where: { id } });
+  revalidatePath("/");
+}
+
+export async function renameTask(id: string, title: string) {
+  const trimmed = title.trim();
+  if (!trimmed) return;
+  await prisma.task.update({ where: { id }, data: { title: trimmed } });
+  revalidatePath("/");
+}
+
+export async function moveSubtask(subtaskId: string, newParentId: string) {
+  if (subtaskId === newParentId) return;
+
+  const newParent = await prisma.task.findUnique({ where: { id: newParentId } });
+  if (!newParent) return;
+
+  await prisma.task.update({
+    where: { id: subtaskId },
+    data: { parentId: newParentId, projectId: newParent.projectId },
+  });
+
   revalidatePath("/");
 }

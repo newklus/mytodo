@@ -23,6 +23,7 @@ model Project {
 model Tag {
   id    String    @id @default(cuid())
   name  String    @unique
+  color String?
   tasks TaskTag[]
 }
 
@@ -57,4 +58,9 @@ model TaskTag {
   tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([taskId, tagId])
+}
+
+model PriorityColor {
+  priority Int    @id // 1~4
+  color    String
 }

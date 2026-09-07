@@ -8,4 +8,4 @@ export type TaskWithRelations = Prisma.TaskGetPayload<{
   };
 }>;
 
-export type { Project } from "@/generated/prisma/client";
+export type { Project, Tag } from "@/generated/prisma/client";

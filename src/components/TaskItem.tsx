@@ -1,14 +1,17 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
-import { createSubtask, deleteTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { createSubtask, deleteTask, moveSubtask, renameTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
+import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
 import type { Project, TaskWithRelations } from "@/lib/types";
 
+const SUBTASK_DRAG_TYPE = "application/x-subtask-id";
+
 const PRIORITIES = [
-  { value: 1, label: "P1 · 긴급", color: "#ef4444" },
-  { value: 2, label: "P2 · 높음", color: "#f97316" },
-  { value: 3, label: "P3 · 보통", color: "#3b82f6" },
-  { value: 4, label: "P4 · 낮음", color: "#9ca3af" },
+  { value: 1, label: "P1 · 긴급" },
+  { value: 2, label: "P2 · 높음" },
+  { value: 3, label: "P3 · 보통" },
+  { value: 4, label: "P4 · 낮음" },
 ];
 
 const RECURRENCE_LABELS: Record<string, string> = {
@@ -17,8 +20,8 @@ const RECURRENCE_LABELS: Record<string, string> = {
   MONTHLY: "매월",
 };
 
-function priorityColor(priority: number) {
-  return PRIORITIES.find((p) => p.value === priority)?.color ?? "#9ca3af";
+function priorityColor(priority: number, colors: Record<number, string>) {
+  return colors[priority] ?? DEFAULT_PRIORITY_COLORS[priority] ?? "#9ca3af";
 }
 
 function formatDate(date: Date) {
@@ -41,9 +44,34 @@ function toDateInputValue(date: Date | null) {
 
 function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number] }) {
   const [isPending, startTransition] = useTransition();
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(subtask.title);
+
+  function commitRename() {
+    setEditing(false);
+    const trimmed = title.trim();
+    if (!trimmed || trimmed === subtask.title) {
+      setTitle(subtask.title);
+      return;
+    }
+    startTransition(async () => {
+      await renameTask(subtask.id, trimmed);
+    });
+  }
 
   return (
     <li className="flex items-center gap-2 py-1">
+      <span
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(SUBTASK_DRAG_TYPE, subtask.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        title="드래그해서 다른 태스크의 하위로 이동"
+        className="shrink-0 cursor-grab select-none text-zinc-300 active:cursor-grabbing"
+      >
+        ⠿
+      </span>
       <button
         onClick={() => startTransition(async () => toggleTaskComplete(subtask.id, !subtask.completed))}
         disabled={isPending}
@@ -52,9 +80,29 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
           subtask.completed ? "border-zinc-400 bg-zinc-400" : "border-zinc-400"
         }`}
       />
-      <span className={`flex-1 text-xs ${subtask.completed ? "text-zinc-400 line-through" : ""}`}>
-        {subtask.title}
-      </span>
+      {editing ? (
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setTitle(subtask.title);
+              setEditing(false);
+            }
+          }}
+          className="flex-1 border-b border-black/20 bg-transparent text-xs outline-none dark:border-white/20"
+        />
+      ) : (
+        <span
+          onClick={() => setEditing(true)}
+          className={`flex-1 cursor-text text-xs ${subtask.completed ? "text-zinc-400 line-through" : ""}`}
+        >
+          {subtask.title}
+        </span>
+      )}
       <button
         onClick={() => startTransition(async () => deleteTask(subtask.id))}
         disabled={isPending}
@@ -101,12 +149,56 @@ function AddSubtaskForm({ parentId }: { parentId: string }) {
 export default function TaskItem({
   task,
   projects,
+  priorityColors = DEFAULT_PRIORITY_COLORS,
 }: {
   task: TaskWithRelations;
   projects: Project[];
+  priorityColors?: Record<number, string>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const editFormRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+
+    function handleClickOutside(e: MouseEvent) {
+      const form = editFormRef.current;
+      if (!form || form.contains(e.target as Node)) return;
+
+      const fd = new FormData(form);
+      const unchanged =
+        String(fd.get("title") ?? "").trim() === task.title &&
+        String(fd.get("description") ?? "").trim() === (task.description ?? "") &&
+        String(fd.get("dueDate") ?? "") === toDateInputValue(task.dueDate) &&
+        String(fd.get("priority") ?? "") === String(task.priority) &&
+        String(fd.get("projectId") ?? "") === (task.projectId ?? "") &&
+        String(fd.get("recurrence") ?? "") === (task.recurrence ?? "") &&
+        String(fd.get("tags") ?? "") === task.tags.map((t) => t.tag.name).join(", ");
+
+      if (unchanged) setEditing(false);
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [editing, task]);
+
+  function handleDragOver(e: React.DragEvent<HTMLElement>) {
+    if (!e.dataTransfer.types.includes(SUBTASK_DRAG_TYPE)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLElement>) {
+    const subtaskId = e.dataTransfer.getData(SUBTASK_DRAG_TYPE);
+    if (!subtaskId) return;
+    e.preventDefault();
+    setIsDragOver(false);
+    startTransition(async () => {
+      await moveSubtask(subtaskId, task.id);
+    });
+  }
 
   function handleToggle() {
     startTransition(async () => {
@@ -133,7 +225,17 @@ export default function TaskItem({
   if (editing) {
     return (
       <li className="py-3">
-        <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2">
+        <form
+          ref={editFormRef}
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.requestSubmit();
+            }
+          }}
+          className="flex flex-wrap items-center gap-2"
+        >
           <input type="hidden" name="id" value={task.id} />
           <input
             name="title"
@@ -186,11 +288,12 @@ export default function TaskItem({
             placeholder="태그 (쉼표로 구분)"
             className="w-40 rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
           />
-          <input
+          <textarea
             name="description"
             defaultValue={task.description ?? ""}
-            placeholder="설명 (선택)"
-            className="w-full flex-1 rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
+            placeholder="메모 (선택, 나중에 자세한 내용을 적어둘 수 있어요) — Ctrl+Enter로 저장"
+            rows={3}
+            className="w-full rounded border border-black/10 bg-transparent px-2 py-1.5 text-sm outline-none dark:border-white/10"
           />
           <div className="flex gap-2">
             <button
@@ -214,7 +317,15 @@ export default function TaskItem({
   }
 
   return (
-    <li className="group py-3">
+    <li
+      onDragOver={handleDragOver}
+      onDragEnter={(e) => {
+        if (e.dataTransfer.types.includes(SUBTASK_DRAG_TYPE)) setIsDragOver(true);
+      }}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={handleDrop}
+      className={`group py-3 ${isDragOver ? "rounded-lg bg-black/5 dark:bg-white/10" : ""}`}
+    >
       <div className="flex items-start gap-3">
         <button
           onClick={handleToggle}
@@ -223,7 +334,7 @@ export default function TaskItem({
           className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${
             task.completed ? "border-zinc-400 bg-zinc-400" : "border-current"
           }`}
-          style={{ borderColor: task.completed ? undefined : priorityColor(task.priority) }}
+          style={{ borderColor: task.completed ? undefined : priorityColor(task.priority, priorityColors) }}
         />
 
         <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setEditing(true)}>
@@ -235,6 +346,7 @@ export default function TaskItem({
               </span>
             )}
             {task.recurrence && <span>↻ {RECURRENCE_LABELS[task.recurrence]}</span>}
+            {task.description && <span title={task.description}>📝</span>}
             {task.project && (
               <span className="flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: task.project.color ?? "#999" }} />
@@ -242,8 +354,12 @@ export default function TaskItem({
               </span>
             )}
             {task.tags.map(({ tag }) => (
-              <span key={tag.id} className="rounded-full bg-black/5 px-2 py-0.5 dark:bg-white/10">
-                #{tag.name}
+              <span
+                key={tag.id}
+                className="flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 dark:bg-white/10"
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tag.color ?? "#999" }} />
+                {tag.name}
               </span>
             ))}
           </div>
