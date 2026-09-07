@@ -1,18 +1,27 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import QuickAddForm from "@/components/QuickAddForm";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
-import TaskItem from "@/components/TaskItem";
+import TaskList from "@/components/TaskList";
 import { getPriorityColors } from "@/lib/priorityColors.server";
 import type { Prisma } from "@/generated/prisma/client";
 
 type View = "today" | "upcoming" | "all" | "completed";
+type Layout = "list" | "priority" | "project" | "tag";
 
 const VIEW_LABELS: Record<View, string> = {
   all: "전체",
   today: "오늘",
   upcoming: "예정",
   completed: "완료",
+};
+
+const LAYOUT_LABELS: Record<Layout, string> = {
+  list: "목록",
+  priority: "우선순위별",
+  project: "프로젝트별",
+  tag: "태그별",
 };
 
 function endOfToday() {
@@ -24,11 +33,13 @@ function endOfToday() {
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; project?: string }>;
+  searchParams: Promise<{ view?: string; project?: string; layout?: string }>;
 }) {
   const params = await searchParams;
   const view: View = (params.view as View) ?? "today";
   const projectId = params.project;
+  const validLayouts: Layout[] = ["list", "priority", "project", "tag"];
+  const layout: Layout = validLayouts.includes(params.layout as Layout) ? (params.layout as Layout) : "list";
 
   const projects = await prisma.project.findMany({ orderBy: { createdAt: "asc" } });
   const tags = await prisma.tag.findMany({ orderBy: { name: "asc" } });
@@ -78,19 +89,29 @@ export default async function Home({
       />
 
       <main className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
-        <h1 className="text-xl font-semibold">{VIEW_LABELS[view]}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">{VIEW_LABELS[view]}</h1>
+          <div className="flex gap-1 text-sm">
+            {(Object.keys(LAYOUT_LABELS) as Layout[]).map((l) => (
+              <Link
+                key={l}
+                href={{ pathname: "/", query: { view, ...(projectId ? { project: projectId } : {}), layout: l } }}
+                className={`rounded border border-black/10 px-3 py-1 dark:border-white/10 ${
+                  layout === l ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-black/5 dark:hover:bg-white/10"
+                }`}
+              >
+                {LAYOUT_LABELS[l]}
+              </Link>
+            ))}
+          </div>
+        </div>
 
-        <QuickAddForm projects={projects} defaultProjectId={projectId} />
+        <QuickAddForm projects={projects} tags={tags} defaultProjectId={projectId} />
 
-        <ul className="flex flex-col divide-y divide-black/5 dark:divide-white/10">
-          {tasks.map((task) => (
-            <TaskItem key={task.id} task={task} projects={projects} priorityColors={priorityColors} />
-          ))}
-          {tasks.length === 0 && <li className="py-8 text-center text-sm text-zinc-400">할 일이 없습니다.</li>}
-        </ul>
+        <TaskList tasks={tasks} projects={projects} tags={tags} priorityColors={priorityColors} layout={layout} />
       </main>
 
-      <QuickAddModal projects={projects} />
+      <QuickAddModal projects={projects} tags={tags} />
     </div>
   );
 }

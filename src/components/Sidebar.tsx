@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createProject, deleteProject } from "@/lib/actions/projects";
+import { createProject } from "@/lib/actions/projects";
 import PriorityColorPicker from "@/components/PriorityColorPicker";
 import TagColorPicker from "@/components/TagColorPicker";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
@@ -71,24 +71,16 @@ export default function Sidebar({
             </Link>
           </li>
           {projects.map((p) => (
-            <li key={p.id} className="group flex items-center justify-between">
+            <li key={p.id}>
               <Link
                 href={{ pathname: "/", query: { view: activeView ?? "today", project: p.id } }}
-                className={`flex flex-1 items-center gap-2 truncate rounded px-3 py-1.5 text-sm ${
+                className={`flex items-center gap-2 truncate rounded px-3 py-1.5 text-sm ${
                   activeProjectId === p.id ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/5 dark:hover:bg-white/10"
                 }`}
               >
                 <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: p.color ?? "#999" }} />
                 <span className="truncate">{p.name}</span>
               </Link>
-              <form action={deleteProject.bind(null, p.id)}>
-                <button
-                  className="hidden px-2 text-xs text-zinc-400 hover:text-red-500 group-hover:block"
-                  title="프로젝트 삭제"
-                >
-                  ✕
-                </button>
-              </form>
             </li>
           ))}
         </ul>
@@ -121,7 +113,7 @@ export default function Sidebar({
                 {tags.map((t) => (
                   <li key={t.id} className="flex items-center gap-2 px-3 py-1 text-sm">
                     <TagColorPicker tagId={t.id} color={t.color ?? "#999999"} />
-                    <span className="truncate text-zinc-600 dark:text-zinc-300">#{t.name}</span>
+                    <span className="flex-1 truncate text-zinc-600 dark:text-zinc-300">#{t.name}</span>
                   </li>
                 ))}
               </ul>

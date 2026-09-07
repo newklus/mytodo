@@ -3,6 +3,9 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { randomColor } from "@/lib/colors";
+import { findOrCreateProject } from "@/lib/actions/projects";
+import { parsePlusDate } from "@/lib/plusDate";
+import { cleanupUnusedProjectAndTags } from "@/lib/cleanupUnused";
 
 function parseDueDate(value: FormDataEntryValue | null): Date | null {
   if (!value || typeof value !== "string" || value.trim() === "") return null;
@@ -34,21 +37,61 @@ function nextDueDate(from: Date, recurrence: string): Date {
   return next;
 }
 
+// SmartTitleInput에서 @/#를 드롭다운으로 확정하지 않고 그냥 Enter로 제출한 경우를 위한
+// 안전망: 제목에 남아있는 "@단어"/"#단어" 토큰을 여기서 마저 뽑아내고 제목에서는 지운다.
+function extractMentions(rawTitle: string): { title: string; projectQuery: string | null; tagNames: string[] } {
+  const tagNames: string[] = [];
+  let projectQuery: string | null = null;
+
+  const title = rawTitle
+    .replace(/(^|\s)([@#])(\S+)/g, (_match, lead: string, trigger: string, word: string) => {
+      if (trigger === "@") {
+        projectQuery = word;
+      } else if (!tagNames.includes(word)) {
+        tagNames.push(word);
+      }
+      return lead;
+    })
+    .replace(/ {2,}/g, " ")
+    .trim();
+
+  return { title, projectQuery, tagNames };
+}
+
 export async function createTask(formData: FormData) {
-  const title = String(formData.get("title") ?? "").trim();
+  const rawTitle = String(formData.get("title") ?? "").trim();
+  if (!rawTitle) return;
+
+  const { title: afterMentions, projectQuery, tagNames: mentionedTagNames } = extractMentions(rawTitle);
+
+  // "+N" 안전망: 날짜 필드가 비어있을 때만 제목에 남은 "+N"으로 마감일을 채운다
+  // (사용자가 날짜 선택기로 직접 고른 값이 있으면 그걸 절대 덮어쓰지 않음)
+  let dueDate = parseDueDate(formData.get("dueDate"));
+  let title = afterMentions;
+  if (!dueDate) {
+    const parsed = parsePlusDate(afterMentions);
+    title = parsed.title;
+    if (parsed.dueDate) dueDate = parseDueDate(parsed.dueDate);
+  }
   if (!title) return;
 
-  const projectId = formData.get("projectId");
+  const projectIdField = formData.get("projectId");
   const priority = formData.get("priority");
   const recurrence = formData.get("recurrence");
-  const tagNames = parseTagNames(formData.get("tags"));
+  const tagNames = [...new Set([...parseTagNames(formData.get("tags")), ...mentionedTagNames])];
+
+  let projectId = projectIdField && projectIdField !== "" ? String(projectIdField) : null;
+  if (!projectId && projectQuery) {
+    const project = await findOrCreateProject(projectQuery);
+    projectId = project?.id ?? null;
+  }
 
   await prisma.task.create({
     data: {
       title,
-      dueDate: parseDueDate(formData.get("dueDate")),
+      dueDate,
       priority: priority ? Number(priority) : 4,
-      projectId: projectId && projectId !== "" ? String(projectId) : null,
+      projectId,
       recurrence: recurrence && recurrence !== "" ? String(recurrence) : null,
       tags: { create: tagsCreateInput(tagNames) },
     },
@@ -88,6 +131,8 @@ export async function updateTask(formData: FormData) {
   const recurrence = formData.get("recurrence");
   const tagNames = parseTagNames(formData.get("tags"));
 
+  const before = await prisma.task.findUnique({ where: { id }, include: { tags: true } });
+
   await prisma.task.update({
     where: { id },
     data: {
@@ -103,6 +148,10 @@ export async function updateTask(formData: FormData) {
       },
     },
   });
+
+  if (before) {
+    await cleanupUnusedProjectAndTags(before.projectId, before.tags.map((t) => t.tagId));
+  }
 
   revalidatePath("/");
 }
@@ -133,7 +182,11 @@ export async function toggleTaskComplete(id: string, completed: boolean) {
 }
 
 export async function deleteTask(id: string) {
+  const task = await prisma.task.findUnique({ where: { id }, include: { tags: true } });
   await prisma.task.delete({ where: { id } });
+  if (task) {
+    await cleanupUnusedProjectAndTags(task.projectId, task.tags.map((t) => t.tagId));
+  }
   revalidatePath("/");
 }
 
@@ -150,10 +203,17 @@ export async function moveSubtask(subtaskId: string, newParentId: string) {
   const newParent = await prisma.task.findUnique({ where: { id: newParentId } });
   if (!newParent) return;
 
+  const subtask = await prisma.task.findUnique({ where: { id: subtaskId } });
+  if (!subtask) return;
+
   await prisma.task.update({
     where: { id: subtaskId },
     data: { parentId: newParentId, projectId: newParent.projectId },
   });
+
+  if (subtask.projectId && subtask.projectId !== newParent.projectId) {
+    await cleanupUnusedProjectAndTags(subtask.projectId, []);
+  }
 
   revalidatePath("/");
 }

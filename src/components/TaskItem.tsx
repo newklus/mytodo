@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { createSubtask, deleteTask, moveSubtask, renameTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
 import type { Project, TaskWithRelations } from "@/lib/types";
@@ -97,7 +97,10 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
         />
       ) : (
         <span
-          onClick={() => setEditing(true)}
+          onClick={() => {
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+            setEditing(true);
+          }}
           className={`flex-1 cursor-text text-xs ${subtask.completed ? "text-zinc-400 line-through" : ""}`}
         >
           {subtask.title}
@@ -150,39 +153,50 @@ export default function TaskItem({
   task,
   projects,
   priorityColors = DEFAULT_PRIORITY_COLORS,
+  selected = false,
+  onToggleSelect,
 }: {
   task: TaskWithRelations;
   projects: Project[];
   priorityColors?: Record<number, string>;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
   const editFormRef = useRef<HTMLFormElement>(null);
 
-  useEffect(() => {
-    if (!editing) return;
+  function isFormUnchanged(form: HTMLFormElement) {
+    const fd = new FormData(form);
+    return (
+      String(fd.get("title") ?? "").trim() === task.title &&
+      String(fd.get("description") ?? "").trim() === (task.description ?? "") &&
+      String(fd.get("dueDate") ?? "") === toDateInputValue(task.dueDate) &&
+      String(fd.get("priority") ?? "") === String(task.priority) &&
+      String(fd.get("projectId") ?? "") === (task.projectId ?? "") &&
+      String(fd.get("recurrence") ?? "") === (task.recurrence ?? "") &&
+      String(fd.get("tags") ?? "") === task.tags.map((t) => t.tag.name).join(", ")
+    );
+  }
 
-    function handleClickOutside(e: MouseEvent) {
-      const form = editFormRef.current;
-      if (!form || form.contains(e.target as Node)) return;
+  // 폼 바깥으로 포커스가 이동하면(다른 필드로 이동하는 게 아니라 완전히 벗어나면)
+  // 변경사항이 있을 때만 자동 저장하고, 없으면 그냥 보기 화면으로 돌아간다.
+  function handleFormBlur(e: React.FocusEvent<HTMLFormElement>) {
+    const form = e.currentTarget;
+    if (e.relatedTarget && form.contains(e.relatedTarget as Node)) return;
 
-      const fd = new FormData(form);
-      const unchanged =
-        String(fd.get("title") ?? "").trim() === task.title &&
-        String(fd.get("description") ?? "").trim() === (task.description ?? "") &&
-        String(fd.get("dueDate") ?? "") === toDateInputValue(task.dueDate) &&
-        String(fd.get("priority") ?? "") === String(task.priority) &&
-        String(fd.get("projectId") ?? "") === (task.projectId ?? "") &&
-        String(fd.get("recurrence") ?? "") === (task.recurrence ?? "") &&
-        String(fd.get("tags") ?? "") === task.tags.map((t) => t.tag.name).join(", ");
-
-      if (unchanged) setEditing(false);
+    if (isFormUnchanged(form)) {
+      setEditing(false);
+      return;
     }
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [editing, task]);
+    const formData = new FormData(form);
+    startTransition(async () => {
+      await updateTask(formData);
+      setEditing(false);
+    });
+  }
 
   function handleDragOver(e: React.DragEvent<HTMLElement>) {
     if (!e.dataTransfer.types.includes(SUBTASK_DRAG_TYPE)) return;
@@ -200,7 +214,9 @@ export default function TaskItem({
     });
   }
 
-  function handleToggle() {
+  function handleComplete() {
+    const verb = task.completed ? "완료를 취소" : "완료 처리";
+    if (!confirm(`"${task.title}"을(를) ${verb}할까요?`)) return;
     startTransition(async () => {
       await toggleTaskComplete(task.id, !task.completed);
     });
@@ -228,6 +244,7 @@ export default function TaskItem({
         <form
           ref={editFormRef}
           onSubmit={handleSubmit}
+          onBlur={handleFormBlur}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
@@ -241,6 +258,7 @@ export default function TaskItem({
             name="title"
             defaultValue={task.title}
             required
+            autoFocus
             className="min-w-[160px] flex-1 rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
           />
           <input
@@ -295,14 +313,7 @@ export default function TaskItem({
             rows={3}
             className="w-full rounded border border-black/10 bg-transparent px-2 py-1.5 text-sm outline-none dark:border-white/10"
           />
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={isPending}
-              className="rounded bg-black px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-            >
-              저장
-            </button>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setEditing(false)}
@@ -310,6 +321,7 @@ export default function TaskItem({
             >
               취소
             </button>
+            <span className="text-xs text-zinc-400">다른 곳을 클릭하면 자동 저장됩니다</span>
           </div>
         </form>
       </li>
@@ -328,16 +340,26 @@ export default function TaskItem({
     >
       <div className="flex items-start gap-3">
         <button
-          onClick={handleToggle}
-          disabled={isPending}
-          aria-label="완료 토글"
-          className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${
-            task.completed ? "border-zinc-400 bg-zinc-400" : "border-current"
-          }`}
-          style={{ borderColor: task.completed ? undefined : priorityColor(task.priority, priorityColors) }}
+          onClick={() => onToggleSelect?.(task.id)}
+          aria-label="선택"
+          aria-pressed={selected}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2"
+          style={{
+            borderColor: priorityColor(task.priority, priorityColors),
+            background: selected ? priorityColor(task.priority, priorityColors) : undefined,
+          }}
         />
 
-        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setEditing(true)}>
+        <div
+          className="min-w-0 flex-1 cursor-pointer"
+          onClick={() => {
+            // 클릭한 곳(div)은 포커스를 못 받는 요소라, 다른 태스크가 편집 중이어도
+            // 자동으로 blur가 안 걸린다. 명시적으로 blur를 걸어서 그쪽의 자동저장/취소
+            // 로직(onBlur)이 먼저 돌게 한 다음 이 태스크를 편집 모드로 연다.
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+            setEditing(true);
+          }}
+        >
           <p className={`text-sm ${task.completed ? "text-zinc-400 line-through" : ""}`}>{task.title}</p>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
             {task.dueDate && (
@@ -365,14 +387,26 @@ export default function TaskItem({
           </div>
         </div>
 
-        <button
-          onClick={handleDelete}
-          disabled={isPending}
-          className="hidden shrink-0 px-2 text-xs text-zinc-400 hover:text-red-500 group-hover:block"
-          title="삭제"
+        <div
+          className={`shrink-0 items-center gap-1 ${
+            task.completed ? "flex" : "hidden group-hover:flex"
+          }`}
         >
-          삭제
-        </button>
+          <button
+            onClick={handleComplete}
+            disabled={isPending}
+            className="px-2 text-xs text-zinc-400 hover:text-emerald-600"
+          >
+            {task.completed ? "완료 취소" : "완료"}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={isPending}
+            className="px-2 text-xs text-zinc-400 hover:text-red-500"
+          >
+            삭제
+          </button>
+        </div>
       </div>
 
       <div className="ml-7 mt-1">

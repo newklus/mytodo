@@ -24,7 +24,7 @@ export default async function ReportPage({
   const tags = await prisma.tag.findMany({ orderBy: { name: "asc" } });
   const priorityColors = await getPriorityColors();
 
-  const [completedTasks, progressTasks] = await Promise.all([
+  const [completedTasks, completedSubtasks, progressTasks] = await Promise.all([
     prisma.task.findMany({
       where: {
         parentId: null,
@@ -36,21 +36,44 @@ export default async function ReportPage({
     }),
     prisma.task.findMany({
       where: {
+        parentId: { not: null },
+        completed: true,
+        completedAt: { gte: start, lte: end },
+      },
+      include: { project: true, parent: true },
+      orderBy: { completedAt: "asc" },
+    }),
+    prisma.task.findMany({
+      where: {
         parentId: null,
         completed: false,
-        OR: [{ dueDate: { gte: start, lte: end } }, { updatedAt: { gte: start, lte: end } }],
+        OR: [
+          { dueDate: { gte: start, lte: end } },
+          { updatedAt: { gte: start, lte: end } },
+          { subtasks: { some: { completedAt: { gte: start, lte: end } } } },
+        ],
       },
       include: { project: true },
       orderBy: [{ dueDate: "asc" }, { updatedAt: "asc" }],
     }),
   ]);
 
-  const completedCandidates = completedTasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    projectName: t.project?.name ?? null,
-    completedAt: (t.completedAt ?? t.updatedAt).toISOString(),
-  }));
+  const completedCandidates = [
+    ...completedTasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      projectName: t.project?.name ?? null,
+      completedAt: (t.completedAt ?? t.updatedAt).toISOString(),
+    })),
+    // 서브태스크 완료도 "완료" 후보에 개별로 보여준다 — 어느 상위 태스크의 하위인지
+    // 알 수 있게 "상위 › 하위" 형식으로 표시 (상위 태스크 이름만 뜨던 문제 수정)
+    ...completedSubtasks.map((t) => ({
+      id: t.id,
+      title: t.parent ? `${t.parent.title} › ${t.title}` : t.title,
+      projectName: t.project?.name ?? null,
+      completedAt: (t.completedAt ?? t.updatedAt).toISOString(),
+    })),
+  ].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
 
   const progressCandidates = progressTasks.map((t) => ({
     id: t.id,
@@ -91,7 +114,7 @@ export default async function ReportPage({
         />
       </main>
 
-      <QuickAddModal projects={projects} />
+      <QuickAddModal projects={projects} tags={tags} />
     </div>
   );
 }

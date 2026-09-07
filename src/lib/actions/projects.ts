@@ -17,7 +17,17 @@ export async function createProject(formData: FormData) {
   revalidatePath("/");
 }
 
-export async function deleteProject(id: string) {
-  await prisma.project.delete({ where: { id } });
+// @멘션에서 이름으로 프로젝트를 찾고, 없으면 랜덤 색상으로 새로 만든다.
+export async function findOrCreateProject(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  const existing = await prisma.project.findFirst({ where: { name: trimmed } });
+  if (existing) return existing;
+
+  const created = await prisma.project.create({
+    data: { name: trimmed, color: randomColor() },
+  });
   revalidatePath("/");
+  return created;
 }
