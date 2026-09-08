@@ -32,7 +32,7 @@ model Task {
   title       String
   description String?
   dueDate     DateTime?
-  priority    Int       @default(4) // 1(높음) ~ 4(낮음)
+  priority    Int       @default(3) // 1(높음) ~ 4(낮음)
   completed   Boolean   @default(false)
   completedAt DateTime?
   recurrence  String? // "DAILY" | "WEEKLY" | "MONTHLY" 등

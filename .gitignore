@@ -39,6 +39,8 @@ yarn-error.log*
 # WAL 모드에서 생기는 사이드카 파일
 /dev.db-wal
 /dev.db-shm
+# 부팅 시 자동 생성되는 일일 스냅샷(최신 7개, src/lib/prisma.ts)
+/backups
 
 # vercel
 .vercel

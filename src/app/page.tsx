@@ -4,6 +4,7 @@ import QuickAddForm from "@/components/QuickAddForm";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
+import UndoToast from "@/components/UndoToast";
 import { getPriorityColors } from "@/lib/priorityColors.server";
 import type { Prisma } from "@/generated/prisma/client";
 
@@ -114,6 +115,7 @@ export default async function Home({
       </main>
 
       <QuickAddModal projects={projects} tags={tags} />
+      <UndoToast />
     </div>
   );
 }

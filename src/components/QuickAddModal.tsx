@@ -20,6 +20,7 @@ function isEditableTarget(target: EventTarget | null) {
 
 export default function QuickAddModal({ projects, tags }: { projects: Project[]; tags: Tag[] }) {
   const [open, setOpen] = useState(false);
+  const [initialDueDate, setInitialDueDate] = useState("");
   const [isPending, startTransition] = useTransition();
   const [projectPending, setProjectPending] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -37,12 +38,24 @@ export default function QuickAddModal({ projects, tags }: { projects: Project[];
       }
       if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !isEditableTarget(e.target)) {
         e.preventDefault();
+        setInitialDueDate("");
         setOpen(true);
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open]);
+
+  // 캘린더 칸을 더블클릭하면(CalendarDayCell) 그 날짜를 마감일로 미리 채운 채 팝업을 연다.
+  useEffect(() => {
+    function handleOpenWithDate(e: Event) {
+      const dueDate = (e as CustomEvent<{ dueDate?: string }>).detail?.dueDate ?? "";
+      setInitialDueDate(dueDate);
+      setOpen(true);
+    }
+    window.addEventListener("quickadd:open", handleOpenWithDate);
+    return () => window.removeEventListener("quickadd:open", handleOpenWithDate);
+  }, []);
 
   function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -87,11 +100,12 @@ export default function QuickAddModal({ projects, tags }: { projects: Project[];
             ref={dueDateRef}
             type="date"
             name="dueDate"
+            defaultValue={initialDueDate}
             className="rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
           />
           <select
             name="priority"
-            defaultValue={4}
+            defaultValue={3}
             className="rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
           >
             {PRIORITIES.map((p) => (

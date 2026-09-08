@@ -114,7 +114,7 @@ export default function Sidebar({
         </form>
       </div>
 
-      <details className="mt-auto">
+      <details>
         <summary className="cursor-pointer select-none text-xs font-semibold uppercase text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
           ⚙ 설정
         </summary>

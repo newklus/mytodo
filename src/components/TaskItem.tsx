@@ -3,6 +3,7 @@
 import { memo, useOptimistic, useRef, useState, useTransition } from "react";
 import { createSubtask, deleteTask, moveSubtask, renameTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
+import { offerUndo } from "@/lib/undoBus";
 import type { Project, TaskWithRelations } from "@/lib/types";
 
 const SUBTASK_DRAG_TYPE = "application/x-subtask-id";
@@ -79,12 +80,18 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
         ⠿
       </span>
       <button
-        onClick={() =>
+        onClick={() => {
+          const nextCompleted = !completed;
           startTransition(async () => {
-            setCompletedOptimistic(!completed);
-            await toggleTaskComplete(subtask.id, !completed);
-          })
-        }
+            setCompletedOptimistic(nextCompleted);
+            const snapshot = await toggleTaskComplete(subtask.id, nextCompleted);
+            offerUndo({
+              type: "complete",
+              message: `"${subtask.title}" ${nextCompleted ? "완료 처리" : "완료 취소"}함`,
+              snapshot,
+            });
+          });
+        }}
         disabled={isPending}
         aria-label="완료 토글"
         className={`h-3 w-3 shrink-0 rounded-full border-2 ${
@@ -121,7 +128,8 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
         onClick={() =>
           startTransition(async () => {
             markRemoved(null);
-            await deleteTask(subtask.id);
+            const snapshot = await deleteTask(subtask.id);
+            offerUndo({ type: "delete", message: `"${subtask.title}" 삭제함`, snapshot });
           })
         }
         disabled={isPending}
@@ -235,11 +243,17 @@ function TaskItem({
   }
 
   function handleComplete() {
+    const nextCompleted = !task.completed;
     const verb = task.completed ? "완료를 취소" : "완료 처리";
     if (!confirm(`"${task.title}"을(를) ${verb}할까요?`)) return;
     startTransition(async () => {
       onLeaveView?.([task.id]);
-      await toggleTaskComplete(task.id, !task.completed);
+      const snapshot = await toggleTaskComplete(task.id, nextCompleted);
+      offerUndo({
+        type: "complete",
+        message: `"${task.title}" ${nextCompleted ? "완료 처리" : "완료 취소"}함`,
+        snapshot,
+      });
     });
   }
 
@@ -247,7 +261,8 @@ function TaskItem({
     if (!confirm(`"${task.title}"을(를) 삭제할까요?`)) return;
     startTransition(async () => {
       onLeaveView?.([task.id]);
-      await deleteTask(task.id);
+      const snapshot = await deleteTask(task.id);
+      offerUndo({ type: "delete", message: `"${task.title}" 삭제함`, snapshot });
     });
   }
 

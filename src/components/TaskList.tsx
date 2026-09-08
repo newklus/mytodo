@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import { completeTasks, deleteTasks } from "@/lib/actions/tasks";
 import TaskItem from "@/components/TaskItem";
+import { offerUndo } from "@/lib/undoBus";
 import type { Project, Tag, TaskWithRelations } from "@/lib/types";
 
 function isEditableTarget(target: EventTarget | null) {
@@ -63,15 +64,36 @@ export default function TaskList({
     });
   }, []);
 
-  // d(완료)/r(삭제) 단축키: 체크된(선택된) 태스크들에 대해 일괄 실행, 실행 전 확인 1회.
-  // 예전에는 선택한 개수만큼 서버 액션을 각각 호출해 페이지를 그 횟수만큼 다시 그렸다.
-  // 이제 일괄 액션 하나로 왕복 1회 · 화면 갱신 1회만 일어난다.
+  // d(완료)/Shift+d(완료 취소)/r(삭제)/Esc(선택 해제) 단축키: 선택된 태스크가 있을 때만 동작.
+  // 완료·삭제는 체크된 태스크 전체에 일괄 실행(실행 전 확인 1회) — 예전에는 선택한 개수만큼
+  // 서버 액션을 각각 호출해 페이지를 그 횟수만큼 다시 그렸지만, 이제 일괄 액션 하나로
+  // 왕복 1회 · 화면 갱신 1회만 일어난다. Shift+r은 마땅한 반대 동작이 없어 계속 비워둔다.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (selectedIds.size === 0) return;
-      // Shift+D/R은 나중에 별도 기능으로 쓸 수 있도록 지금은 예약해두고 막는다.
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (isEditableTarget(e.target)) return;
+
+      if (e.key === "Escape") {
+        setSelectedIds(new Set());
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.shiftKey) {
+        if (e.key.toLowerCase() !== "d") return;
+        e.preventDefault();
+        const ids = [...selectedIds];
+        if (!confirm(`선택한 ${ids.length}개 작업을 완료 취소할까요?`)) return;
+        setSelectedIds(new Set());
+        startTransition(async () => {
+          hideTasks(ids);
+          const snapshot = await completeTasks(ids, false);
+          offerUndo({ type: "complete", message: `${ids.length}개 완료 취소함`, snapshot });
+        });
+        return;
+      }
+
       if (e.key !== "d" && e.key !== "r") return;
 
       const isComplete = e.key === "d";
@@ -82,7 +104,13 @@ export default function TaskList({
       setSelectedIds(new Set());
       startTransition(async () => {
         hideTasks(ids);
-        await (isComplete ? completeTasks(ids, true) : deleteTasks(ids));
+        if (isComplete) {
+          const snapshot = await completeTasks(ids, true);
+          offerUndo({ type: "complete", message: `${ids.length}개 완료 처리함`, snapshot });
+        } else {
+          const snapshot = await deleteTasks(ids);
+          offerUndo({ type: "delete", message: `${ids.length}개 삭제함`, snapshot });
+        }
       });
     }
     document.addEventListener("keydown", handleKeyDown);
@@ -131,9 +159,20 @@ export default function TaskList({
   }, [layout, visibleTasks, projects, tags, priorityColors]);
 
   const selectionBar = selectedIds.size > 0 && (
-    <div className="flex items-center gap-2 rounded-lg bg-black/5 px-3 py-2 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-      {selectedIds.size}개 선택됨 · <kbd className="rounded border border-black/20 px-1 dark:border-white/20">d</kbd> 완료 ·{" "}
-      <kbd className="rounded border border-black/20 px-1 dark:border-white/20">r</kbd> 삭제
+    <div className="flex items-center justify-between gap-2 rounded-lg bg-black/5 px-3 py-2 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
+      <span>
+        {selectedIds.size}개 선택됨 · <kbd className="rounded border border-black/20 px-1 dark:border-white/20">d</kbd> 완료 ·{" "}
+        <kbd className="rounded border border-black/20 px-1 dark:border-white/20">⇧d</kbd> 완료 취소 ·{" "}
+        <kbd className="rounded border border-black/20 px-1 dark:border-white/20">r</kbd> 삭제 ·{" "}
+        <kbd className="rounded border border-black/20 px-1 dark:border-white/20">esc</kbd> 선택 해제
+      </span>
+      <button
+        type="button"
+        onClick={() => setSelectedIds(new Set())}
+        className="rounded px-2 py-0.5 text-zinc-500 hover:bg-black/10 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-100"
+      >
+        선택 해제
+      </button>
     </div>
   );
 

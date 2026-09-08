@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
+import UndoToast from "@/components/UndoToast";
 import WeeklyReportBuilder from "@/components/WeeklyReportBuilder";
 import { formatWeekLabel, getWeekRange } from "@/lib/week";
 import { getPriorityColors } from "@/lib/priorityColors.server";
@@ -115,6 +116,7 @@ export default async function ReportPage({
       </main>
 
       <QuickAddModal projects={projects} tags={tags} />
+      <UndoToast />
     </div>
   );
 }

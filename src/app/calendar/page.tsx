@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import CalendarDayCell from "@/components/CalendarDayCell";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
+import UndoToast from "@/components/UndoToast";
 import { getPriorityColors } from "@/lib/priorityColors.server";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
 import type { TaskWithRelations } from "@/lib/types";
@@ -55,7 +57,7 @@ export default async function CalendarPage({
   const todayKey = toDateKey(new Date());
   const selectedKey = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : todayKey;
 
-  const [projects, tags, priorityColors, tasks] = await Promise.all([
+  const [projects, tags, priorityColors, tasks, unscheduledTasks] = await Promise.all([
     prisma.project.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.tag.findMany({ orderBy: { name: "asc" } }),
     getPriorityColors(),
@@ -71,6 +73,16 @@ export default async function CalendarPage({
         tags: { include: { tag: true } },
       },
       orderBy: [{ priority: "asc" }, { dueDate: "asc" }, { createdAt: "asc" }],
+    }),
+    // 마감일이 없는 태스크는 어느 달을 보고 있든 그리드에 걸릴 일이 없으니 달 범위와 무관하게 항상 조회한다.
+    prisma.task.findMany({
+      where: { parentId: null, completed: false, dueDate: null },
+      include: {
+        project: true,
+        subtasks: { orderBy: { createdAt: "asc" } },
+        tags: { include: { tag: true } },
+      },
+      orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
     }),
   ]);
 
@@ -143,45 +155,24 @@ export default async function CalendarPage({
             </div>
             <div className="grid grid-cols-7 gap-1">
               {cells.map((cell) => {
-                const isSelected = cell.key === selectedKey;
-                const isToday = cell.key === todayKey;
                 const visible = cell.tasks.slice(0, MAX_CHIPS_PER_CELL);
                 const overflow = cell.tasks.length - visible.length;
                 return (
-                  <Link
+                  <CalendarDayCell
                     key={cell.key}
-                    href={{ pathname: "/calendar", query: { month: currentMonthParam, date: cell.key } }}
-                    className={`block min-h-[92px] rounded border p-1 text-left text-xs ${
-                      isSelected
-                        ? "border-black dark:border-white"
-                        : "border-black/10 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
-                    } ${cell.inMonth ? "" : "opacity-40"}`}
-                  >
-                    <span
-                      className={
-                        isToday
-                          ? "flex h-5 w-5 items-center justify-center rounded-full bg-black text-white dark:bg-white dark:text-black"
-                          : ""
-                      }
-                    >
-                      {cell.date.getDate()}
-                    </span>
-                    <div className="mt-1 flex flex-col gap-0.5">
-                      {visible.map((t) => (
-                        <span
-                          key={t.id}
-                          className="flex items-center gap-1 truncate rounded bg-black/5 px-1 py-0.5 dark:bg-white/10"
-                        >
-                          <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full"
-                            style={{ background: priorityColors[t.priority] ?? DEFAULT_PRIORITY_COLORS[t.priority] }}
-                          />
-                          <span className="truncate">{t.title}</span>
-                        </span>
-                      ))}
-                      {overflow > 0 && <span className="text-zinc-400">+{overflow}개</span>}
-                    </div>
-                  </Link>
+                    dateKey={cell.key}
+                    monthParam={currentMonthParam}
+                    dayNumber={cell.date.getDate()}
+                    isSelected={cell.key === selectedKey}
+                    isToday={cell.key === todayKey}
+                    inMonth={cell.inMonth}
+                    overflow={overflow}
+                    chips={visible.map((t) => ({
+                      id: t.id,
+                      title: t.title,
+                      color: priorityColors[t.priority] ?? DEFAULT_PRIORITY_COLORS[t.priority],
+                    }))}
+                  />
                 );
               })}
             </div>
@@ -197,9 +188,21 @@ export default async function CalendarPage({
             )}
           </div>
         </div>
+
+        {unscheduledTasks.length > 0 && (
+          <details className="border-t border-black/10 pt-4 dark:border-white/10">
+            <summary className="cursor-pointer select-none text-sm font-semibold hover:text-zinc-600 dark:hover:text-zinc-300">
+              미등록 일정 ({unscheduledTasks.length}개)
+            </summary>
+            <div className="mt-3">
+              <TaskList tasks={unscheduledTasks} projects={projects} tags={tags} priorityColors={priorityColors} layout="list" />
+            </div>
+          </details>
+        )}
       </main>
 
       <QuickAddModal projects={projects} tags={tags} />
+      <UndoToast />
     </div>
   );
 }

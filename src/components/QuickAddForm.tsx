@@ -59,7 +59,7 @@ export default function QuickAddForm({
       />
       <select
         name="priority"
-        defaultValue={4}
+        defaultValue={3}
         className="rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
       >
         {PRIORITIES.map((p) => (

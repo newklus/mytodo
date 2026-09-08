@@ -127,29 +127,64 @@ export default function SmartTitleInput({
     requestAnimationFrame(() => localInputRef.current?.focus());
   }
 
-  // Enter 한 번으로 텍스트에 남아있는 @/# 전부를 한꺼번에 칩으로 확정한다.
-  // (커서 위치의 토큰 하나만이 아니라 문자열 전체를 훑음) 확정할 게 있었으면
-  // true를 반환하고, 이땐 그 Enter는 제출로 이어지지 않는다 — 남은 게 하나도
-  // 없어야("정리된 제목만 남음") 다음 Enter가 실제로 폼을 제출한다.
-  function resolveAllMentions(): boolean {
-    const { title: afterMentions, projectQuery, tagQueries } = parseAllMentions(text);
+  // Enter 한 번으로 (1) 지금 드롭다운에 떠 있는 활성 토큰은 강조된 항목으로 확정하고
+  // (Tab과 동일한 매칭 규칙 — 부분 입력이어도 OK), (2) 그 토큰을 지운 나머지 텍스트에서
+  // 이미 완성된(스페이스로 닫힌) @단어/#단어들은 완전일치 기준으로 마저 확정한다.
+  // 이 둘을 한 번에 처리해야 "제목 @프로젝트 #태그"처럼 여러 개를 이어 쓰고 Enter 한 번만
+  // 눌러도 전부 확정된다 — 활성 토큰과 나머지 텍스트를 따로따로 처리하면(각자 자기 state
+  // 스냅샷만 보고 setText를 두 번 호출하게 되어) 서로 덮어써서 한 번에 하나씩만 반영된다.
+  // 확정할 게 있었으면 true를 반환하고, 이땐 이 Enter는 제출로 이어지지 않는다.
+  function resolveEnter(): boolean {
+    let workingText = text;
+    let dropdownProject: { id: string | null; name: string; color: string | null; pending?: boolean } | null = null;
+    let dropdownTag: string | null = null;
+    let createProjectLabel: string | null = null;
+
+    if (activeToken && suggestions.length > 0) {
+      const chosen = suggestions[highlight] ?? suggestions[0];
+      workingText = (workingText.slice(0, activeToken.start) + workingText.slice(cursorPos)).replace(/ {2,}/g, " ");
+      if (activeToken.trigger === "@") {
+        if (chosen.isCreate) {
+          dropdownProject = { id: null, name: chosen.label, color: null, pending: true };
+          createProjectLabel = chosen.label;
+        } else {
+          dropdownProject = { id: chosen.key, name: chosen.label, color: chosen.color };
+        }
+      } else {
+        dropdownTag = chosen.label;
+      }
+    }
+
+    const { title: afterMentions, projectQuery, tagQueries } = parseAllMentions(workingText);
     const { title: cleaned, dueDate } = parsePlusDate(afterMentions);
-    if (!projectQuery && tagQueries.length === 0 && !dueDate) return false;
+
+    if (!dropdownProject && !dropdownTag && !projectQuery && tagQueries.length === 0 && !dueDate) return false;
 
     setText(cleaned);
     setCursorPos(cleaned.length);
     setHighlight(0);
     setDismissed(false);
 
-    if (tagQueries.length > 0) {
+    const allNewTags = dropdownTag ? [dropdownTag, ...tagQueries] : tagQueries;
+    if (allNewTags.length > 0) {
       setSelectedTags((prev) => {
         const merged = [...prev];
-        for (const t of tagQueries) if (!merged.includes(t)) merged.push(t);
+        for (const t of allNewTags) if (!merged.includes(t)) merged.push(t);
         return merged;
       });
     }
 
-    if (projectQuery && !selectedProject) {
+    if (dropdownProject) {
+      setSelectedProject(dropdownProject);
+      if (createProjectLabel) {
+        onPendingChange?.(true);
+        startTransition(async () => {
+          const created = await findOrCreateProject(createProjectLabel);
+          if (created) setSelectedProject({ id: created.id, name: created.name, color: created.color });
+          onPendingChange?.(false);
+        });
+      }
+    } else if (projectQuery && !selectedProject) {
       const query = projectQuery;
       const existing = projects.find((p) => p.name.toLowerCase() === query.toLowerCase());
       if (existing) {
@@ -183,10 +218,8 @@ export default function SmartTitleInput({
         setHighlight((h) => Math.max(h - 1, 0));
         return;
       }
-      if (e.key === "Tab" || e.key === "Enter") {
-        // 드롭다운이 떠 있는 동안은 Tab과 Enter를 동일하게 취급 — 강조된 항목을 그대로 선택한다.
-        // (부분 입력 상태에서 Enter가 완전일치만 인정해 별개의 새 항목을 만들어버리던 문제 수정.
-        //  스페이스를 눌러 드롭다운이 닫힌 뒤에 누르는 Enter는 아래 resolveAllMentions로 그대로 빠진다.)
+      if (e.key === "Tab") {
+        // Tab은 드롭다운에서 강조된 항목 하나만 콕 집어 고르는 용도로 남겨둔다.
         e.preventDefault();
         selectSuggestion(suggestions[highlight]);
         return;
@@ -199,7 +232,7 @@ export default function SmartTitleInput({
       }
     }
 
-    if (e.key === "Enter" && resolveAllMentions()) {
+    if (e.key === "Enter" && resolveEnter()) {
       // 아직 정리할 @/#가 남아있었으면 이 Enter는 제출로 넘어가지 않는다.
       // 남은 게 없을 때(=이 함수가 false 반환)만 브라우저 기본 제출 동작이 그대로 진행됨.
       e.preventDefault();
