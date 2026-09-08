@@ -1,16 +1,17 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import CalendarDayCell from "@/components/CalendarDayCell";
+import CalendarDayCell, { type CalendarChip } from "@/components/CalendarDayCell";
 import CalendarSplit from "@/components/CalendarSplit";
 import CollapsibleSection from "@/components/CollapsibleSection";
-import PaginatedTaskList from "@/components/PaginatedTaskList";
+import ListPagination from "@/components/ListPagination";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
 import UndoToast from "@/components/UndoToast";
 import { getPriorityColors } from "@/lib/priorityColors.server";
+import { PAGE_SIZE_COOKIE, parsePageParam, parsePageSize } from "@/lib/pageSize";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
-import type { TaskWithRelations } from "@/lib/types";
 
 const MAX_CHIPS_PER_CELL = 3;
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -40,11 +41,15 @@ function monthParam(year: number, month: number) {
 export default async function CalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; date?: string; project?: string }>;
+  searchParams: Promise<{ month?: string; date?: string; project?: string; unscheduled?: string }>;
 }) {
   const params = await searchParams;
+  const cookieStore = await cookies();
   const { year, month } = parseMonthParam(params.month);
   const projectId = params.project;
+  // "미등록 일정"도 목록 화면과 같은 "페이지당 개수" 설정을 따른다 (5.2.2절).
+  const pageSize = parsePageSize(cookieStore.get(PAGE_SIZE_COOKIE)?.value);
+  const requestedUnscheduledPage = parsePageParam(params.unscheduled);
 
   const firstOfMonth = new Date(year, month, 1);
   const firstWeekday = firstOfMonth.getDay();
@@ -61,50 +66,96 @@ export default async function CalendarPage({
   const todayKey = toDateKey(new Date());
   const selectedKey = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : todayKey;
 
-  const [projects, tags, priorityColors, tasks, unscheduledTasks] = await Promise.all([
-    prisma.project.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.tag.findMany({ orderBy: { name: "asc" } }),
-    getPriorityColors(),
-    prisma.task.findMany({
-      where: {
-        parentId: null,
-        completed: false,
-        dueDate: { gte: gridStart, lte: gridEnd },
-        ...(projectId ? { projectId } : {}),
-      },
-      include: {
-        project: true,
-        subtasks: { orderBy: { createdAt: "asc" } },
-        tags: { include: { tag: true } },
-      },
-      orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
-    }),
-    // 마감일이 없는 태스크는 어느 달을 보고 있든 그리드에 걸릴 일이 없으니 달 범위와 무관하게 항상 조회한다.
-    prisma.task.findMany({
-      where: { parentId: null, completed: false, dueDate: null, ...(projectId ? { projectId } : {}) },
-      include: {
-        project: true,
-        subtasks: { orderBy: { createdAt: "asc" } },
-        tags: { include: { tag: true } },
-      },
-      orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
-    }),
-  ]);
+  // 선택된 날짜의 0시~24시 — 사이드 패널만 관계까지 필요한 범위다.
+  const selectedStart = new Date(`${selectedKey}T00:00:00`);
+  const selectedEnd = new Date(selectedStart);
+  selectedEnd.setHours(23, 59, 59, 999);
 
-  const tasksByDate = new Map<string, TaskWithRelations[]>();
-  for (const t of tasks) {
+  const listInclude = {
+    project: true,
+    subtasks: { orderBy: { createdAt: "asc" } },
+    tags: { include: { tag: true } },
+  } as const;
+  const listOrder = [{ priority: "asc" }, { createdAt: "asc" }, { id: "asc" }] as const;
+
+  const unscheduledWhere = {
+    parentId: null,
+    completed: false,
+    dueDate: null,
+    ...(projectId ? { projectId } : {}),
+  } as const;
+
+  // 마감일이 없는 태스크는 어느 달을 보고 있든 그리드에 걸릴 일이 없으니 달 범위와 무관하게 항상 조회한다.
+  // 예전에는 전건을 가져와 클라이언트에서 10개씩 잘라 보여줬는데(PaginatedTaskList), 화면에
+  // 10개만 보여주려고 서버가 전부 조회·직렬화하고 있었다. 지금은 목록 화면과 같은 방식으로
+  // 쿼리에서 한 페이지만 잘라 온다.
+  const unscheduledQuery = (skip: number) =>
+    prisma.task.findMany({
+      where: unscheduledWhere,
+      include: listInclude,
+      orderBy: [...listOrder],
+      skip,
+      take: pageSize,
+    });
+
+  const [projects, tags, priorityColors, gridTasks, selectedTasks, unscheduledCount, requestedUnscheduled] =
+    await Promise.all([
+      prisma.project.findMany({ orderBy: { createdAt: "asc" } }),
+      prisma.tag.findMany({ orderBy: { name: "asc" } }),
+      getPriorityColors(),
+      // 그리드 칸의 칩이 쓰는 건 제목·우선순위색·날짜뿐이다. 예전에는 여기서도 프로젝트·서브태스크·
+      // 태그를 통째로 붙여 왔는데, 화면에 쓰이지도 않으면서 조회·직렬화·전송량만 키웠다.
+      prisma.task.findMany({
+        where: {
+          parentId: null,
+          completed: false,
+          dueDate: { gte: gridStart, lte: gridEnd },
+          ...(projectId ? { projectId } : {}),
+        },
+        select: { id: true, title: true, priority: true, dueDate: true },
+        orderBy: [...listOrder],
+      }),
+      // 패널은 "선택한 하루"만 보여주므로 그 하루치만 관계까지 붙여서 따로 가져온다.
+      prisma.task.findMany({
+        where: {
+          parentId: null,
+          completed: false,
+          dueDate: { gte: selectedStart, lte: selectedEnd },
+          ...(projectId ? { projectId } : {}),
+        },
+        include: listInclude,
+        orderBy: [...listOrder],
+      }),
+      prisma.task.count({ where: unscheduledWhere }),
+      unscheduledQuery(requestedUnscheduledPage * pageSize),
+    ]);
+
+  const unscheduledTotalPages = Math.max(1, Math.ceil(unscheduledCount / pageSize));
+  const unscheduledPage = Math.min(requestedUnscheduledPage, unscheduledTotalPages - 1);
+  const unscheduledTasks =
+    unscheduledPage === requestedUnscheduledPage
+      ? requestedUnscheduled
+      : await unscheduledQuery(unscheduledPage * pageSize);
+
+  const chipsByDate = new Map<string, CalendarChip[]>();
+  for (const t of gridTasks) {
     if (!t.dueDate) continue;
     const key = toDateKey(t.dueDate);
-    const list = tasksByDate.get(key);
-    if (list) list.push(t);
-    else tasksByDate.set(key, [t]);
+    const chip: CalendarChip = {
+      id: t.id,
+      title: t.title,
+      color: priorityColors[t.priority] ?? DEFAULT_PRIORITY_COLORS[t.priority],
+    };
+    const list = chipsByDate.get(key);
+    if (list) list.push(chip);
+    else chipsByDate.set(key, [chip]);
   }
 
   const cells = Array.from({ length: totalCells }, (_, i) => {
     const date = new Date(gridStart);
     date.setDate(date.getDate() + i);
     const key = toDateKey(date);
-    return { date, key, inMonth: date.getMonth() === month, tasks: tasksByDate.get(key) ?? [] };
+    return { date, key, inMonth: date.getMonth() === month, chips: chipsByDate.get(key) ?? [] };
   });
 
   const currentMonthParam = monthParam(year, month);
@@ -112,13 +163,11 @@ export default async function CalendarPage({
   const nextMonthParam = monthParam(year, month + 1);
   const monthLabel = `${year}년 ${month + 1}월`;
 
-  const selectedDate = new Date(`${selectedKey}T00:00:00`);
-  const selectedTasks = tasksByDate.get(selectedKey) ?? [];
   const selectedLabel = new Intl.DateTimeFormat("ko-KR", {
     month: "long",
     day: "numeric",
     weekday: "short",
-  }).format(selectedDate);
+  }).format(selectedStart);
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -168,27 +217,19 @@ export default async function CalendarPage({
                 ))}
               </div>
               <div className="grid grid-cols-7 gap-1">
-                {cells.map((cell) => {
-                  const visible = cell.tasks.slice(0, MAX_CHIPS_PER_CELL);
-                  const overflow = cell.tasks.length - visible.length;
-                  return (
-                    <CalendarDayCell
-                      key={cell.key}
-                      dateKey={cell.key}
-                      monthParam={currentMonthParam}
-                      dayNumber={cell.date.getDate()}
-                      isSelected={cell.key === selectedKey}
-                      isToday={cell.key === todayKey}
-                      inMonth={cell.inMonth}
-                      overflow={overflow}
-                      chips={visible.map((t) => ({
-                        id: t.id,
-                        title: t.title,
-                        color: priorityColors[t.priority] ?? DEFAULT_PRIORITY_COLORS[t.priority],
-                      }))}
-                    />
-                  );
-                })}
+                {cells.map((cell) => (
+                  <CalendarDayCell
+                    key={cell.key}
+                    dateKey={cell.key}
+                    monthParam={currentMonthParam}
+                    dayNumber={cell.date.getDate()}
+                    isSelected={cell.key === selectedKey}
+                    isToday={cell.key === todayKey}
+                    inMonth={cell.inMonth}
+                    overflow={Math.max(0, cell.chips.length - MAX_CHIPS_PER_CELL)}
+                    chips={cell.chips.slice(0, MAX_CHIPS_PER_CELL)}
+                  />
+                ))}
               </div>
             </>
           }
@@ -205,13 +246,33 @@ export default async function CalendarPage({
           }
         />
 
-        {unscheduledTasks.length > 0 && (
+        {unscheduledCount > 0 && (
           <CollapsibleSection
-            summary={`미등록 일정 (${unscheduledTasks.length}개)`}
+            summary={`미등록 일정 (${unscheduledCount}개)`}
             className="border-t border-black/10 pt-4 dark:border-white/10"
+            defaultOpen={unscheduledPage > 0}
           >
             <div className="mt-3">
-              <PaginatedTaskList tasks={unscheduledTasks} projects={projects} tags={tags} priorityColors={priorityColors} />
+              <TaskList
+                tasks={unscheduledTasks}
+                projects={projects}
+                tags={tags}
+                priorityColors={priorityColors}
+                layout="list"
+              />
+              <ListPagination
+                page={unscheduledPage}
+                totalPages={unscheduledTotalPages}
+                totalCount={unscheduledCount}
+                pageSize={pageSize}
+                pathname="/calendar"
+                paramName="unscheduled"
+                query={{
+                  month: currentMonthParam,
+                  date: selectedKey,
+                  ...(projectId ? { project: projectId } : {}),
+                }}
+              />
             </div>
           </CollapsibleSection>
         )}

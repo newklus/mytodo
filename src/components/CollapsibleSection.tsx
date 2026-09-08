@@ -9,10 +9,15 @@ export default function CollapsibleSection({
   summary,
   children,
   className = "",
+  defaultOpen = false,
 }: {
   summary: ReactNode;
   children: ReactNode;
   className?: string;
+  // 안의 목록이 서버 페이지네이션을 쓰면 "다음" 링크가 곧 페이지 이동이라, 그때 이 섹션이
+  // 닫혀버리면 안 된다. 첫 페이지가 아닐 때 열린 채로 그려지도록 서버가 알려준다.
+  // (사용자가 직접 펼치고 접는 건 여전히 브라우저의 <details> 기본 동작 그대로다.)
+  defaultOpen?: boolean;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const scrollBeforeOpenRef = useRef(0);
@@ -33,7 +38,7 @@ export default function CollapsibleSection({
   }
 
   return (
-    <details ref={detailsRef} onToggle={handleToggle} className={className}>
+    <details ref={detailsRef} open={defaultOpen} onToggle={handleToggle} className={className}>
       <summary className="cursor-pointer select-none text-sm font-semibold hover:text-zinc-600 dark:hover:text-zinc-300">
         {summary}
       </summary>

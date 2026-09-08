@@ -7,13 +7,23 @@ import { createProject } from "@/lib/actions/projects";
 import PriorityColorPicker from "@/components/PriorityColorPicker";
 import TagColorPicker from "@/components/TagColorPicker";
 import { DEFAULT_MEMO_EXPANDED, getMemoDefaultExpanded, setMemoDefaultExpanded } from "@/lib/memoSettings";
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  MIN_PAGE_SIZE,
+  clampPageSize,
+  getPageSizeFromCookieString,
+  setPageSizeCookie,
+} from "@/lib/pageSize";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
 import {
   DEFAULT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
-  announceSidebarWidth,
+  SIDEBAR_WIDTH_VAR,
+  applySidebarWidth,
   getSidebarWidth,
+  useStoredSidebarWidth,
 } from "@/lib/sidebarWidth";
 import {
   DEFAULT_START_PAGE,
@@ -55,30 +65,52 @@ export default function Sidebar({
   calendarDate?: string;
 }) {
   const router = useRouter();
-  const [width, setWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [dragging, setDragging] = useState(false);
   const [memoDefault, setMemoDefault] = useState(DEFAULT_MEMO_EXPANDED);
   const [startPage, setStartPage] = useState<StartPage>(DEFAULT_START_PAGE);
+  // 입력 중에는 지우거나 잘못 쳐도 그대로 두고(문자열 상태), 확정할 때만 범위로 맞춰 저장한다.
+  const [pageSizeInput, setPageSizeInput] = useState(String(DEFAULT_PAGE_SIZE));
   const asideRef = useRef<HTMLElement>(null);
   const settingsRef = useRef<HTMLDetailsElement>(null);
+  // 드래그 중 매 mousemove마다 getBoundingClientRect()를 부르면 그때마다 강제 레이아웃이 걸린다.
+  // 사이드바의 왼쪽 좌표는 드래그하는 동안 변하지 않으므로 시작할 때 한 번만 재둔다.
+  const dragLeftRef = useRef(0);
+  const widthRef = useRef(DEFAULT_SIDEBAR_WIDTH);
+
+  // 저장된 사이드바 폭은 CSS 변수로만 반영한다(리액트 상태 아님) — 아래 드래그 참고.
+  useStoredSidebarWidth();
 
   // 마운트 후에 저장된 값을 읽어야 SSR 결과(기본값)와 하이드레이션이 어긋나지 않는다.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWidth(getSidebarWidth());
     setMemoDefault(getMemoDefaultExpanded());
     setStartPage(getStartPageFromCookieString(document.cookie));
+    setPageSizeInput(String(getPageSizeFromCookieString(document.cookie)));
+    widthRef.current = getSidebarWidth();
   }, []);
 
+  // 목록을 자르는 건 서버 쿼리라, 값을 바꾸면 쿠키에 저장하고 현재 라우트를 다시 그리게 한다.
+  // (범위를 벗어난 ?page= 는 서버가 마지막 페이지로 알아서 당겨준다.)
+  const commitPageSize = useCallback(
+    (raw: string) => {
+      const parsed = Number(raw);
+      const next = Number.isFinite(parsed) && raw.trim() !== "" ? clampPageSize(parsed) : DEFAULT_PAGE_SIZE;
+      setPageSizeInput(String(next));
+      if (next === getPageSizeFromCookieString(document.cookie)) return;
+      setPageSizeCookie(next);
+      router.refresh();
+    },
+    [router]
+  );
+
+  // 드래그 중에는 리액트 상태를 건드리지 않고 CSS 변수만 갱신한다. 예전에는 mousemove마다
+  // setState가 돌아 사이드바와 하단 단축키 바가 통째로 리렌더됐는데, 폭은 스타일 값 하나일 뿐이라
+  // 렌더 트리를 다시 만들 이유가 없다. 저장은 드래그가 끝났을 때 한 번만 한다.
   const handleMove = useCallback((clientX: number) => {
-    const aside = asideRef.current;
-    if (!aside) return;
-    const rect = aside.getBoundingClientRect();
-    const next = clientX - rect.left;
+    const next = clientX - dragLeftRef.current;
     const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, next));
-    setWidth(clamped);
-    // 드래그 중에도 하단 단축키 바 등 다른 컴포넌트가 실시간으로 폭을 따라오게 알린다(저장은 안 함).
-    announceSidebarWidth(clamped, false);
+    widthRef.current = clamped;
+    applySidebarWidth(clamped, false);
   }, []);
 
   useEffect(() => {
@@ -88,10 +120,7 @@ export default function Sidebar({
     }
     function onMouseUp() {
       setDragging(false);
-      setWidth((w) => {
-        announceSidebarWidth(w, true);
-        return w;
-      });
+      applySidebarWidth(widthRef.current, true);
     }
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -104,11 +133,14 @@ export default function Sidebar({
   return (
     <aside
       ref={asideRef}
-      style={{ width }}
+      style={{ width: SIDEBAR_WIDTH_VAR }}
       className="relative flex min-h-0 shrink-0 flex-col gap-6 overflow-y-auto border-r border-black/10 p-4 dark:border-white/10"
     >
       <div
-        onMouseDown={() => setDragging(true)}
+        onMouseDown={() => {
+          dragLeftRef.current = asideRef.current?.getBoundingClientRect().left ?? 0;
+          setDragging(true);
+        }}
         role="separator"
         aria-orientation="vertical"
         aria-label="사이드바 크기 조절"
@@ -250,6 +282,30 @@ export default function Sidebar({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase text-zinc-500">페이지당 개수</div>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={MIN_PAGE_SIZE}
+              max={MAX_PAGE_SIZE}
+              value={pageSizeInput}
+              onChange={(e) => setPageSizeInput(e.target.value)}
+              onBlur={(e) => commitPageSize(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+              }}
+              aria-label="목록 한 페이지에 표시할 개수"
+              className="w-full rounded border border-black/10 bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
+            />
+            <p className="mt-1 px-1 text-xs text-zinc-400">
+              목록 화면 기준 {MIN_PAGE_SIZE}~{MAX_PAGE_SIZE}개 (기본 {DEFAULT_PAGE_SIZE})
+            </p>
           </div>
 
           {tags.length > 0 && (

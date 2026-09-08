@@ -14,7 +14,7 @@ import {
   type ShortcutAction,
   type ShortcutBinding,
 } from "@/lib/shortcuts";
-import { useSidebarWidth } from "@/lib/sidebarWidth";
+import { SIDEBAR_WIDTH_VAR } from "@/lib/sidebarWidth";
 
 const IGNORED_KEYS = ["Shift", "Control", "Alt", "Meta"];
 const MODIFIER_KEY_MAP: Record<string, ModifierKey> = {
@@ -49,7 +49,6 @@ function LockIcon({ locked }: { locked: boolean }) {
 export default function ShortcutBar() {
   const shortcuts = useShortcuts();
   const multiSelectModifier = useMultiSelectModifier();
-  const sidebarWidth = useSidebarWidth();
   const [capturing, setCapturing] = useState<Capturing>(null);
   // 항상 잠금 상태로 시작한다(새로고침/재접속 시 리셋) — 실수로 단축키가 바뀌는 걸 막기 위함.
   const [locked, setLocked] = useState(true);
@@ -118,7 +117,8 @@ export default function ShortcutBar() {
 
   return (
     <footer
-      style={{ marginLeft: sidebarWidth }}
+      // 사이드바 폭을 구독해 리렌더하는 대신 같은 CSS 변수를 그대로 참조한다 (sidebarWidth.ts 참고).
+      style={{ marginLeft: SIDEBAR_WIDTH_VAR }}
       className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 border-t border-black/10 px-4 py-1.5 text-xs text-zinc-500 dark:border-white/10 dark:text-zinc-400"
     >
       <button

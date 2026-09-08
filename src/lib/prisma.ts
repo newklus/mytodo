@@ -34,7 +34,7 @@ function backupDailySnapshot() {
 
   try {
     const dbPath = url.replace(/^file:/, "");
-    if (!fs.existsSync(dbPath)) return;
+    if (!fs.existsSync(/*turbopackIgnore: true*/ dbPath)) return;
 
     const dir = path.dirname(dbPath);
     const ext = path.extname(dbPath) || ".db";
@@ -42,7 +42,10 @@ function backupDailySnapshot() {
     const backupDir = path.join(dir, "backups");
     const todayPath = path.join(backupDir, `${stem}-${todayKey()}${ext}`);
 
-    if (fs.existsSync(todayPath)) return; // 오늘 이미 백업함
+    // turbopackIgnore: 경로가 런타임에 정해지는 fs 호출이라 번들러가 "무엇을 읽을지 모르니
+    // 프로젝트 전체를 서버 번들에 넣자"고 판단한다(빌드 경고). 여기서 읽는 건 소스가 아니라
+    // 실행 중인 DB 파일이므로 트레이싱 대상에서 빼도 된다.
+    if (fs.existsSync(/*turbopackIgnore: true*/ todayPath)) return; // 오늘 이미 백업함
 
     fs.mkdirSync(backupDir, { recursive: true });
     fs.copyFileSync(dbPath, todayPath);
@@ -50,7 +53,7 @@ function backupDailySnapshot() {
     // 최신 데이터가 백업에서 누락되지 않는다.
     for (const suffix of ["-wal", "-shm"]) {
       const src = dbPath + suffix;
-      if (fs.existsSync(src)) fs.copyFileSync(src, todayPath + suffix);
+      if (fs.existsSync(/*turbopackIgnore: true*/ src)) fs.copyFileSync(src, todayPath + suffix);
     }
 
     // 파일 개수 기준으로 최신 N개만 남긴다(날짜 범위 기준이면 며칠 건너뛰었을 때
@@ -65,7 +68,7 @@ function backupDailySnapshot() {
       fs.unlinkSync(base);
       for (const suffix of ["-wal", "-shm"]) {
         const sidecar = base + suffix;
-        if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar);
+        if (fs.existsSync(/*turbopackIgnore: true*/ sidecar)) fs.unlinkSync(sidecar);
       }
     }
   } catch {

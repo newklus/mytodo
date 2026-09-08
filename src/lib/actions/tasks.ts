@@ -372,21 +372,25 @@ export async function deleteTasks(ids: string[]) {
 // 원래 id 그대로 복원(upsert — 아직 남아있으면 그대로 둠)한 다음, 부모 태스크 →
 // 서브태스크 순서로 원래 id를 그대로 써서 다시 만든다. best-effort이므로
 // 그 사이 같은 프로젝트/태그가 다른 이름으로 다시 쓰이는 등 충돌이 나면 조용히 포기한다.
+//
+// 예전에는 복원할 행마다 await를 걸어 하나씩 왕복했다. 일괄 삭제를 되돌리면 선택했던
+// 개수(+서브태스크)만큼 왕복과 커밋이 그대로 반복돼서, 되돌리는 쪽만 개수에 비례해 느렸다
+// (일괄 삭제 자체는 이미 왕복 1회다). 전부 한 트랜잭션으로 묶어 커밋 1회로 끝낸다 —
+// 덤으로 "절반만 복원된 상태"가 남을 수 없게 된다(전부 복원되거나 전부 그대로).
 export async function undoDelete(snapshot: DeleteUndoSnapshot | null) {
   if (!snapshot || (snapshot.tasks.length === 0 && snapshot.subtasks.length === 0)) return;
   try {
-    for (const p of snapshot.projects) {
-      await prisma.project.upsert({ where: { id: p.id }, update: {}, create: p });
-    }
-    for (const t of snapshot.tags) {
-      await prisma.tag.upsert({ where: { id: t.id }, update: {}, create: t });
-    }
-    for (const row of [...snapshot.tasks, ...snapshot.subtasks]) {
-      const { tagIds, ...data } = row;
-      await prisma.task.create({ data: { ...data, tags: { create: tagIds.map((tagId) => ({ tagId })) } } });
-    }
+    await prisma.$transaction([
+      ...snapshot.projects.map((p) => prisma.project.upsert({ where: { id: p.id }, update: {}, create: p })),
+      ...snapshot.tags.map((t) => prisma.tag.upsert({ where: { id: t.id }, update: {}, create: t })),
+      // 서브태스크는 부모가 먼저 있어야 parentId 외래키가 맞으므로 순서를 유지한다
+      // ($transaction([...])은 배열 순서대로 실행된다).
+      ...[...snapshot.tasks, ...snapshot.subtasks].map(({ tagIds, ...data }) =>
+        prisma.task.create({ data: { ...data, tags: { create: tagIds.map((tagId) => ({ tagId })) } } })
+      ),
+    ]);
   } catch {
-    // 복원 도중 충돌이 나면 이미 만들어진 부분은 남기고 그냥 넘어간다.
+    // 복원 도중 충돌이 나면(그새 같은 id가 다시 생겼다든지) 전부 되돌리고 그냥 넘어간다.
   }
   refresh();
 }

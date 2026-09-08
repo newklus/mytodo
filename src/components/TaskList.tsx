@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useOptimistic, useState, useTransition
 import { completeTasks, deleteTasks } from "@/lib/actions/tasks";
 import TaskItem from "@/components/TaskItem";
 import { offerUndo } from "@/lib/undoBus";
-import { matchesShortcut, useShortcuts } from "@/lib/shortcuts";
+import { matchesShortcut, useMultiSelectModifier, useShortcuts } from "@/lib/shortcuts";
+import { useMemoDefaultExpanded } from "@/lib/memoSettings";
 import { announceSelectionCount } from "@/lib/selectionCount";
 import type { Project, Tag, TaskWithRelations } from "@/lib/types";
 
@@ -45,9 +46,33 @@ export default function TaskList({
   priorityColors: Record<number, string>;
   layout?: Layout;
 }) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [rawSelectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
   const shortcuts = useShortcuts();
+  // 목록 전체가 공유하는 설정 두 가지. 예전엔 TaskItem마다 각자 읽어서 행 수만큼
+  // localStorage 읽기·window 리스너·마운트 직후 추가 렌더가 생겼다 (측정: 234행 → 468회 읽기).
+  const multiSelectModifier = useMultiSelectModifier();
+  const memoDefaultExpanded = useMemoDefaultExpanded();
+
+  // 목록이 페이지 단위로 잘려 오면서 "선택해둔 태스크가 화면에서 사라지는" 상황이 생겼다
+  // (페이지 이동, 페이지당 개수 변경, 다른 조작으로 목록이 갱신될 때). 그대로 두면 d/r
+  // 단축키가 지금 보이지도 않는 항목까지 건드린다. 이건 상태를 고쳐 쓰는 게 아니라 렌더할
+  // 때마다 "지금 목록에 실제로 있는 것"만 남기고 걸러내면 되는 파생값이라 useMemo로 둔다.
+  const selectedIds = useMemo(() => {
+    if (rawSelectedIds.size === 0) return rawSelectedIds;
+    const present = new Set(tasks.map((t) => t.id));
+    let hasMissing = false;
+    for (const id of rawSelectedIds) {
+      if (!present.has(id)) {
+        hasMissing = true;
+        break;
+      }
+    }
+    if (!hasMissing) return rawSelectedIds;
+    const next = new Set<string>();
+    for (const id of rawSelectedIds) if (present.has(id)) next.add(id);
+    return next;
+  }, [rawSelectedIds, tasks]);
 
   // 완료/완료취소/삭제는 전부 "이 태스크가 현재 뷰에서 빠진다"로 귀결된다.
   // (완료 뷰에서는 완료 취소한 것이, 나머지 뷰에서는 완료 처리한 것이 목록을 떠난다.)
@@ -180,6 +205,8 @@ export default function TaskList({
       priorityColors={priorityColors}
       selected={selectedIds.has(task.id)}
       isSoleSelection={selectedIds.size === 1 && selectedIds.has(task.id)}
+      multiSelectModifier={multiSelectModifier}
+      memoDefaultExpanded={memoDefaultExpanded}
       onToggleSelect={toggleSelect}
       onSelectOnly={selectOnly}
       onLeaveView={hideTasks}

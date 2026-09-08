@@ -1,10 +1,10 @@
 "use client";
 
-import { memo, useEffect, useOptimistic, useRef, useState, useTransition } from "react";
+import { memo, useOptimistic, useRef, useState, useTransition } from "react";
 import { createSubtask, deleteTask, moveSubtask, renameTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
-import { DEFAULT_MEMO_EXPANDED, getMemoDefaultExpanded } from "@/lib/memoSettings";
+import { DEFAULT_MEMO_EXPANDED } from "@/lib/memoSettings";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
-import { isModifierPressed, useMultiSelectModifier } from "@/lib/shortcuts";
+import { DEFAULT_MULTI_SELECT_MODIFIER, isModifierPressed, type ModifierKey } from "@/lib/shortcuts";
 import { offerUndo } from "@/lib/undoBus";
 import type { Project, TaskWithRelations } from "@/lib/types";
 
@@ -181,6 +181,8 @@ function TaskItem({
   priorityColors = DEFAULT_PRIORITY_COLORS,
   selected = false,
   isSoleSelection = false,
+  multiSelectModifier = DEFAULT_MULTI_SELECT_MODIFIER,
+  memoDefaultExpanded = DEFAULT_MEMO_EXPANDED,
   onToggleSelect,
   onSelectOnly,
   onLeaveView,
@@ -189,6 +191,10 @@ function TaskItem({
   projects: Project[];
   priorityColors?: Record<number, string>;
   selected?: boolean;
+  // 아래 둘은 예전엔 행마다 각자 localStorage에서 읽던 값이다. 목록 전체가 공유하는 설정이라
+  // TaskList가 한 번만 읽어 내려준다 (행 수만큼 늘어나던 읽기·window 리스너·추가 렌더 제거).
+  multiSelectModifier?: ModifierKey;
+  memoDefaultExpanded?: boolean;
   // 현재 선택된 태스크가 이 하나뿐인지 — 본문을 다시 클릭했을 때 편집으로 들어갈지 판단하는 데 쓰인다.
   isSoleSelection?: boolean;
   // 다중 선택 조합키(기본 Ctrl)를 누른 채 클릭 — 기존 선택을 유지하며 토글.
@@ -203,14 +209,10 @@ function TaskItem({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
   const editFormRef = useRef<HTMLFormElement>(null);
-  const [memoExpanded, setMemoExpanded] = useState(DEFAULT_MEMO_EXPANDED);
-  const multiSelectModifier = useMultiSelectModifier();
-
-  // 마운트 후에 저장된 기본값을 읽어야 SSR 결과와 하이드레이션이 어긋나지 않는다.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMemoExpanded(getMemoDefaultExpanded());
-  }, []);
+  // 이 태스크의 메모를 직접 접거나 편 적이 있으면 그 선택이 이기고, 아니면 공통 기본값을 따른다.
+  const [memoOverride, setMemoOverride] = useState<boolean | null>(null);
+  const memoExpanded = memoOverride ?? memoDefaultExpanded;
+  const toggleMemo = () => setMemoOverride(!memoExpanded);
 
   function isFormUnchanged(form: HTMLFormElement) {
     const fd = new FormData(form);
@@ -447,7 +449,7 @@ function TaskItem({
                 <span
                   onClick={(e) => {
                     e.stopPropagation();
-                    setMemoExpanded((v) => !v);
+                    toggleMemo();
                   }}
                   title={memoExpanded ? "메모 접기" : task.description}
                   className="cursor-pointer"
@@ -475,7 +477,7 @@ function TaskItem({
               <p
                 onClick={(e) => {
                   e.stopPropagation();
-                  setMemoExpanded(false);
+                  setMemoOverride(false);
                 }}
                 className="mt-1 cursor-pointer whitespace-pre-wrap text-xs text-zinc-500 dark:text-zinc-400"
               >
