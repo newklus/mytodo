@@ -4,7 +4,7 @@ import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import UndoToast from "@/components/UndoToast";
 import WeeklyReportBuilder from "@/components/WeeklyReportBuilder";
-import { formatWeekLabel, getWeekRange } from "@/lib/week";
+import { formatISODate, formatWeekLabel, getWeekRange } from "@/lib/week";
 import { getPriorityColors } from "@/lib/priorityColors.server";
 
 export default async function ReportPage({
@@ -16,6 +16,10 @@ export default async function ReportPage({
   const reference = params.week ? new Date(params.week) : new Date();
   const { start, end } = getWeekRange(Number.isNaN(reference.getTime()) ? new Date() : reference);
 
+  // 주 이동 링크는 반드시 **로컬 기준** 날짜로 만들어야 한다.
+  // start 는 로컬 월요일 00:00 인데 toISOString() 을 쓰면 UTC로 바뀌면서 KST(+9)에서는
+  // 전날(일요일)이 된다. 그러면 "다음 주"가 같은 주로 되돌아오고 "지난 주"는 한 주를
+  // 건너뛰어 2주 전으로 간다 — 실제로 그렇게 동작하던 버그를 라우트 테스트가 잡았다.
   const prevWeek = new Date(start);
   prevWeek.setDate(prevWeek.getDate() - 7);
   const nextWeek = new Date(start);
@@ -94,13 +98,13 @@ export default async function ReportPage({
           <h1 className="text-xl font-semibold">주간보고 · {weekLabel}</h1>
           <div className="flex gap-2 text-sm">
             <Link
-              href={{ pathname: "/report", query: { week: prevWeek.toISOString().slice(0, 10) } }}
+              href={{ pathname: "/report", query: { week: formatISODate(prevWeek) } }}
               className="rounded border border-black/10 px-3 py-1.5 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
             >
               ← 지난 주
             </Link>
             <Link
-              href={{ pathname: "/report", query: { week: nextWeek.toISOString().slice(0, 10) } }}
+              href={{ pathname: "/report", query: { week: formatISODate(nextWeek) } }}
               className="rounded border border-black/10 px-3 py-1.5 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
             >
               다음 주 →

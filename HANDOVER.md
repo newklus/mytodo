@@ -1,6 +1,6 @@
 # MyTodo 인수인계서
 
-> 작성: 2026-09-08 (6회차 세션 종료 시점 — 성능 최적화 2회차를 진행한 세션).
+> 작성: 2026-09-08 (7회차 세션 종료 시점 — 성능 최적화 2회차 + 자동화 테스트 도입).
 > **가장 먼저 [`requirements.md`](requirements.md)를 전체 읽을 것** — 이 문서는 "지금 상태로 오게 된 맥락과 다음에 뭘 하면 좋을지"만 요약한 보조 문서이고, 기능 스펙의 단일 기준(SSOT)은 항상 `requirements.md`다. 성능 이력은 [`PERF.md`](PERF.md).
 
 ## 1. 이 프로젝트가 뭔지
@@ -24,7 +24,7 @@
 - **마이그레이션은 전부 적용된 상태다** (`npx prisma migrate status` → up to date)
 - 부팅할 때마다 `backups/dev-YYYY-MM-DD.db`가 자동 생성된다 (최신 7개 유지, `requirements.md` 10.7절). 앱은 이걸 안 읽으니 무시해도 되고, 재해 복구용으로만 존재
 - **이 세션(6회차)은 포트 3000에 `next start`(프로덕션 서버)를 띄워둔 상태로 종료함** — 성능 측정을 위해 프로덕션으로 띄운 것이고, 코드를 고치면 반영이 안 되니 개발을 이어갈 거면 그 프로세스를 종료하고 `dev.cmd`로 다시 띄울 것. 포트 3000이 점유돼 있으면 그 프로세스가 이 프로젝트 것인지 확인 후(포트 3000 응답 확인) PID를 특정해서만 종료할 것 (`taskkill /F /IM node.exe`로 전체 종료 금지)
-- 작업 완료 기준: **항상** `npx tsc --noEmit` + `npm run lint` 통과. UI 변경은 브라우저로 직접 클릭 확인. **성능 작업은 반드시 측정값(전/후)을 남길 것** — "빨라진 것 같다"가 아니라 숫자로
+- 작업 완료 기준: **항상** `npm test` + `npx tsc --noEmit` + `npm run lint` 통과 (라우트까지 보려면 `npm run test:all`, 상세는 `requirements.md` 11절). UI 변경은 브라우저로 직접 클릭 확인. **성능 작업은 반드시 측정값(전/후)을 남길 것** — "빨라진 것 같다"가 아니라 숫자로
 
 ## 3. 지금까지 진행 상황
 
@@ -48,9 +48,25 @@
   6. `undoDelete`를 한 트랜잭션으로 묶음(개수만큼 왕복하던 것 → 커밋 1회, 부분 복원 불가)
   7. 빌드 경고(프로젝트 전체 트레이싱) 제거 — `prisma.ts`의 `fs` 호출에 `turbopackIgnore`
 
+- **7회차 요약 (이번 세션 · 자동화 테스트 도입 — 상세는 `requirements.md` 11절)**:
+  1. **테스트가 0개였는데 182개가 생겼다** — 순수 함수(51) + 서버 액션(71) + 라우트 스모크(60). `npm test` 0.4초, `npm run test:all` 약 30초
+  2. **추가 의존성 0개**: Vitest/Jest 없이 Node 내장 러너 + 타입 스트리핑으로 프로젝트 `.ts` 소스를 그대로 읽는다. `tests/helpers/hooks.mjs`가 `@/` 별칭·`next/cache` 스텁·Prisma 확장자 보완을 담당
+  3. **실데이터 보호 가드**: `.env` 때문에 실수 한 번이면 테스트가 `dev.db`를 건드릴 수 있어서, `tests/.tmp` 밖·`dev.db` 이름·상대 경로를 전부 거부하는 가드를 두고 그 가드에도 테스트를 붙였다
+  4. **테스트가 실제 버그를 하나 잡았다**: 주간보고의 "다음 주" 버튼이 제자리, "지난 주"가 2주 전으로 가고 있었다(링크를 `toISOString()`으로 만들어 KST에서 월요일이 아닌 전날 일요일을 가리킴). `formatISODate()`로 고침
+  5. 브라우저 E2E(Playwright)는 **의도적으로 보류** — 유지비가 잡는 버그보다 크다고 판단(5절의 자동화 한계 목록 참고)
+
 ## 4. 코드를 새로 읽지 않으면 놓치기 쉬운 것들
 
-### 4.1 6회차에서 새로 생기거나 바뀐 파일
+### 4.1 7회차에서 새로 생긴 파일 (테스트)
+
+- `tests/helpers/hooks.mjs` — Node 러너용 모듈 훅. **테스트 실행의 전제**라 여기가 깨지면 전부 안 돈다
+- `tests/helpers/testDb.ts` — 임시 DB 생성/폐기 + `assertSafeTestDbPath()` 가드. 템플릿 DB를 한 번 만들어 복사하는 방식(파일마다 `prisma db push` 하면 느리다)
+- `tests/helpers/factory.ts` — 픽스처 삽입과 검증용 조회. 준비는 SQL, 검증도 SQL, 실행만 액션이라는 원칙. `localDateKey()`가 여기 있다
+- `tests/helpers/server.ts` — 라우트 테스트용 프로덕션 서버 기동 + HTML 파서(`hasText`/`paginationInfo`/`renderedTaskTitles`)
+- `tests/helpers/nextCacheStub.ts` — `next/cache` 대체. `.mjs`가 아니라 `.ts`인 건 테스트가 직접 임포트해 타입을 봐야 해서다
+- `tests/unit/` 6개 · `tests/actions/` 7개 · `tests/routes/` 4개
+
+### 4.2 6회차에서 새로 생기거나 바뀐 파일
 
 - `src/lib/pageSize.ts` (신규) — 페이지당 개수·페이지 번호 파싱. `startPage.ts`와 같이 `"use client"` 없는 **순수 유틸**(서버/클라이언트 공용, 쿠키 이름·범위 공유 목적)
 - `src/components/ListPagination.tsx` (신규) — 목록과 캘린더 "미등록 일정"이 같이 쓴다(`pathname`/`paramName` props로 구분). 버튼이 아니라 `Link`라서 페이지 이동이 곧 새 조회다
@@ -63,7 +79,7 @@
 - `src/components/TaskList.tsx` — 선택 목록을 `useMemo`로 "지금 화면에 있는 id"만 남기도록 파생시킴(페이지가 바뀌면 선택 자동 해제)
 - `src/components/CollapsibleSection.tsx` — `defaultOpen` prop 추가(미등록 일정 페이지 이동 시 섹션이 닫히지 않게)
 
-### 4.2 그 이전부터 있던, 코드만 봐선 놓치기 쉬운 설계 결정 (요약 — 상세는 이전 `HANDOVER.md` 버전이나 `requirements.md` 참고)
+### 4.3 그 이전부터 있던, 코드만 봐선 놓치기 쉬운 설계 결정 (요약 — 상세는 이전 `HANDOVER.md` 버전이나 `requirements.md` 참고)
 
 - `src/lib/startPage.ts`는 다른 `lib` 파일과 달리 `"use client"`가 없는 순수 유틸(서버/클라이언트 공용, 쿠키 이름·타입 공유 목적)
 - `Sidebar.tsx`의 "⚙ 설정" 스크롤과 `CollapsibleSection.tsx`(캘린더 "미등록 일정")는 스크롤 대상 컨테이너가 달라서 의도적으로 로직을 통합하지 않음 (`requirements.md`/이전 handover 4.2절)
@@ -83,11 +99,19 @@
 - **(신규, 6회차) 선택 상태가 측정 사이에 살아남는다**: 클릭 측정을 하고 나면 선택이 남아 있는데, 그 상태로 Ctrl+클릭을 더해 일괄 삭제를 하면 **의도하지 않은 태스크까지 지워진다**. 실제로 이번 세션에서 실데이터 1건을 그렇게 지웠다(백업으로 복원함). 파괴적 조작은 **반드시 벤치 DB에서만** 하고, 하기 직전에 `Esc`로 선택을 비우고 `aria-pressed="true"` 개수를 세어 확인할 것
 - **(신규, 5회차)** 이번 세션에서 `computer` 툴의 `coordinate`/`ref` 클릭이 캘린더 사이드바 프로젝트 링크에서 반복적으로 엉뚱한 곳을 클릭했다 — `screenshot`이 800x450인데 실제 페이지 뷰포트(`window.innerWidth/innerHeight`)는 1280x720이고 `devicePixelRatio`가 3인 환경이라 좌표 프레임이 안 맞았던 것으로 보인다(`read_page`가 보고하는 논리 뷰포트와 `screenshot` 반환 크기가 다름). **Link 클릭 후 실제로 이동했는지 애매하면 `coordinate`/`ref` 대신 `javascript_exec`로 `document.querySelector('a[href*="..."]').click()`을 쓰고 `window.location.href`로 결과를 검증하는 게 훨씬 안정적이었다.** 순수 시각적 확인(스크린샷)이 꼭 필요한 게 아니라면 이 방법을 우선 고려할 것
 
+- **(신규, 7회차) 라우트 검증은 브라우저보다 HTML이 낫다**: 뷰 필터·정렬·페이지네이션·500 여부는 `tests/routes/`처럼 서버를 띄워 HTML만 봐도 전부 확인된다. 훨씬 빠르고 위 한계들에 안 걸린다. 브라우저는 **클릭·드래그·CSS처럼 HTML로 못 보는 것**에만 쓸 것
+
 ## 6. 다음 세션 시작할 때 참고할 것
 
-### 6.1 아직 커밋 안 된 상태다
+### 6.1 커밋 상태
 
-6회차 변경(위 3절)이 전부 워킹 트리에만 있다. `npx tsc --noEmit` + `npm run lint` + 프로덕션 빌드(경고 0건)는 통과했고 브라우저 확인도 끝났으니, 사용자가 커밋을 요청하면 그대로 올리면 된다. 변경 파일은 4.1절 목록 그대로 + `requirements.md`/`PERF.md`/`HANDOVER.md`.
+6회차 성능 작업은 커밋·푸시 완료(`717b174`). **7회차 테스트 작업은 아직 커밋 안 됨** — `npm run test:all`(182개 전부 통과) + `tsc` + `lint` + 빌드(경고 0건) 다 통과한 상태이니 요청이 오면 그대로 올리면 된다.
+
+### 6.1.1 테스트를 이어서 늘린다면
+
+- **설계 문서는 따로 없다.** `requirements.md` 11절이 실행법·규칙을, 각 테스트 파일 상단 주석이 "왜 이걸 검증하는가"를 설명한다
+- 우선순위가 높은 건 이미 다 덮었다. 남은 후보는 ① 브라우저 E2E(보류 중, 5절 참고) ② React 컴포넌트 렌더 테스트(jsdom+RTL+Vitest가 필요해 의존성 0 원칙이 깨진다 — 로직은 이미 액션·라우트가 덮고 있어 회수가 낮다고 판단) ③ 성능 회귀 테스트(수치가 머신마다 흔들려 거짓 실패, `PERF.md` 회차 측정으로 대체)
+- **테스트를 늘릴 때 새 버그를 발견하면 그것도 성과다.** 7회차에 주간보고 주 이동 버그가 그렇게 나왔다
 
 ### 6.2 성능 작업을 또 하게 되면
 

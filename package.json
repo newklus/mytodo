@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "serve": "next build && next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/hooks.mjs --test \"tests/unit/**/*.test.ts\" \"tests/actions/**/*.test.ts\"",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/hooks.mjs --test \"tests/unit/**/*.test.ts\"",
+    "test:routes": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/hooks.mjs --test \"tests/routes/**/*.test.ts\"",
+    "test:all": "npm run test && npm run build && npm run test:routes"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.10.0",

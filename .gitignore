@@ -59,3 +59,6 @@ skills-lock.json
 
 # editor/note-app config unrelated to the project
 /.obsidian
+
+# 테스트가 만드는 임시 DB (tests/helpers/testDb.ts)
+/tests/.tmp
