@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import CalendarDayCell from "@/components/CalendarDayCell";
+import CalendarSplit from "@/components/CalendarSplit";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
@@ -72,7 +74,7 @@ export default async function CalendarPage({
         subtasks: { orderBy: { createdAt: "asc" } },
         tags: { include: { tag: true } },
       },
-      orderBy: [{ priority: "asc" }, { dueDate: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
     }),
     // 마감일이 없는 태스크는 어느 달을 보고 있든 그리드에 걸릴 일이 없으니 달 범위와 무관하게 항상 조회한다.
     prisma.task.findMany({
@@ -120,7 +122,7 @@ export default async function CalendarPage({
       <Sidebar projects={projects} tags={tags} priorityColors={priorityColors} isCalendarPage />
 
       <main className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold">{monthLabel}</h1>
           <div className="flex gap-2 text-sm">
             <Link
@@ -144,60 +146,63 @@ export default async function CalendarPage({
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 gap-6">
-          <div className="min-w-0 flex-[3]">
-            <div className="grid grid-cols-7 gap-1 text-center text-xs text-zinc-500">
-              {WEEKDAY_LABELS.map((w) => (
-                <div key={w} className="py-1">
-                  {w}
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {cells.map((cell) => {
-                const visible = cell.tasks.slice(0, MAX_CHIPS_PER_CELL);
-                const overflow = cell.tasks.length - visible.length;
-                return (
-                  <CalendarDayCell
-                    key={cell.key}
-                    dateKey={cell.key}
-                    monthParam={currentMonthParam}
-                    dayNumber={cell.date.getDate()}
-                    isSelected={cell.key === selectedKey}
-                    isToday={cell.key === todayKey}
-                    inMonth={cell.inMonth}
-                    overflow={overflow}
-                    chips={visible.map((t) => ({
-                      id: t.id,
-                      title: t.title,
-                      color: priorityColors[t.priority] ?? DEFAULT_PRIORITY_COLORS[t.priority],
-                    }))}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="min-w-0 flex-[2] border-l border-black/10 pl-6 dark:border-white/10">
-            <h2 className="mb-1 text-sm font-semibold">{selectedLabel}</h2>
-            <p className="mb-3 text-xs text-zinc-500">할 일 {selectedTasks.length}개</p>
-            {selectedTasks.length === 0 ? (
-              <p className="text-sm text-zinc-400">이 날짜에 마감인 할 일이 없습니다.</p>
-            ) : (
-              <TaskList tasks={selectedTasks} projects={projects} tags={tags} priorityColors={priorityColors} layout="list" />
-            )}
-          </div>
-        </div>
+        <CalendarSplit
+          left={
+            <>
+              <div className="grid grid-cols-7 gap-1 text-center text-xs text-zinc-500">
+                {WEEKDAY_LABELS.map((w) => (
+                  <div key={w} className="py-1">
+                    {w}
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {cells.map((cell) => {
+                  const visible = cell.tasks.slice(0, MAX_CHIPS_PER_CELL);
+                  const overflow = cell.tasks.length - visible.length;
+                  return (
+                    <CalendarDayCell
+                      key={cell.key}
+                      dateKey={cell.key}
+                      monthParam={currentMonthParam}
+                      dayNumber={cell.date.getDate()}
+                      isSelected={cell.key === selectedKey}
+                      isToday={cell.key === todayKey}
+                      inMonth={cell.inMonth}
+                      overflow={overflow}
+                      chips={visible.map((t) => ({
+                        id: t.id,
+                        title: t.title,
+                        color: priorityColors[t.priority] ?? DEFAULT_PRIORITY_COLORS[t.priority],
+                      }))}
+                    />
+                  );
+                })}
+              </div>
+            </>
+          }
+          right={
+            <>
+              <h2 className="mb-1 text-sm font-semibold">{selectedLabel}</h2>
+              <p className="mb-3 text-xs text-zinc-500">할 일 {selectedTasks.length}개</p>
+              {selectedTasks.length === 0 ? (
+                <p className="text-sm text-zinc-400">이 날짜에 마감인 할 일이 없습니다.</p>
+              ) : (
+                <TaskList tasks={selectedTasks} projects={projects} tags={tags} priorityColors={priorityColors} layout="list" />
+              )}
+            </>
+          }
+        />
 
         {unscheduledTasks.length > 0 && (
-          <details className="border-t border-black/10 pt-4 dark:border-white/10">
-            <summary className="cursor-pointer select-none text-sm font-semibold hover:text-zinc-600 dark:hover:text-zinc-300">
-              미등록 일정 ({unscheduledTasks.length}개)
-            </summary>
+          <CollapsibleSection
+            summary={`미등록 일정 (${unscheduledTasks.length}개)`}
+            className="border-t border-black/10 pt-4 dark:border-white/10"
+          >
             <div className="mt-3">
               <TaskList tasks={unscheduledTasks} projects={projects} tags={tags} priorityColors={priorityColors} layout="list" />
             </div>
-          </details>
+          </CollapsibleSection>
         )}
       </main>
 

@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { START_PAGE_COOKIE, isStartPage } from "@/lib/startPage";
 import QuickAddForm from "@/components/QuickAddForm";
 import QuickAddModal from "@/components/QuickAddModal";
+import SelectionCountBadge from "@/components/SelectionCountBadge";
 import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
 import UndoToast from "@/components/UndoToast";
@@ -31,13 +35,34 @@ function endOfToday() {
   return d;
 }
 
+const COMPLETED_VIEW_DAYS = 15;
+
+function daysAgoStart(days: number) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d;
+}
+
 export default async function Home({
   searchParams,
 }: {
   searchParams: Promise<{ view?: string; project?: string; layout?: string }>;
 }) {
   const params = await searchParams;
-  const view: View = (params.view as View) ?? "today";
+
+  // view가 명시되지 않은 "맨 URL" 진입(=앱을 새로 켰을 때)에만 설정된 시작 페이지를 따른다.
+  // 사이드바의 "전체"/"오늘" 링크 등은 항상 view를 명시하므로 이 로직과 무관하게 그대로 동작한다.
+  let view: View;
+  if (params.view) {
+    view = params.view as View;
+  } else {
+    const cookieStore = await cookies();
+    const startPage = cookieStore.get(START_PAGE_COOKIE)?.value;
+    if (isStartPage(startPage) && startPage === "calendar") redirect("/calendar");
+    view = isStartPage(startPage) && startPage === "all" ? "all" : "today";
+  }
+
   const projectId = params.project;
   const validLayouts: Layout[] = ["list", "priority", "project", "tag"];
   const layout: Layout = validLayouts.includes(params.layout as Layout) ? (params.layout as Layout) : "list";
@@ -49,6 +74,7 @@ export default async function Home({
 
   if (view === "completed") {
     where.completed = true;
+    where.completedAt = { gte: daysAgoStart(COMPLETED_VIEW_DAYS) };
   } else {
     where.completed = false;
     if (view === "today") {
@@ -58,12 +84,11 @@ export default async function Home({
     }
   }
 
-  // 전체 뷰: 일정순(마감일 순, 마감일 없는 태스크는 맨 뒤)으로 정렬해
-  // 마감일 없는 태스크도 눈에 띄게 한다. 나머지 뷰는 우선순위를 먼저 본다.
+  // 완료 뷰는 최신 완료된 것이 위(우선순위 무관). 나머지는 우선순위 → 생성일(빠를수록 위) 순.
   const orderBy: Prisma.TaskOrderByWithRelationInput[] =
-    view === "all"
-      ? [{ dueDate: { sort: "asc", nulls: "last" } }, { priority: "asc" }, { createdAt: "asc" }]
-      : [{ priority: "asc" }, { dueDate: "asc" }, { createdAt: "asc" }];
+    view === "completed"
+      ? [{ completedAt: "desc" }]
+      : [{ priority: "asc" }, { createdAt: "asc" }];
 
   // 네 쿼리는 서로 의존하지 않으므로 순차로 await 하지 않고 한꺼번에 보낸다.
   const [projects, tags, priorityColors, tasks] = await Promise.all([
@@ -93,7 +118,10 @@ export default async function Home({
 
       <main className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">{VIEW_LABELS[view]}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold">{VIEW_LABELS[view]}</h1>
+            <SelectionCountBadge />
+          </div>
           <div className="flex gap-1 text-sm">
             {(Object.keys(LAYOUT_LABELS) as Layout[]).map((l) => (
               <Link

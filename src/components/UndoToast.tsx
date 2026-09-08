@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { undoComplete, undoDelete } from "@/lib/actions/tasks";
 import { UNDO_EVENT, type UndoOffer } from "@/lib/undoBus";
+import { matchesShortcut, useShortcuts } from "@/lib/shortcuts";
 
 const AUTO_DISMISS_MS = 8000;
 
@@ -16,6 +17,7 @@ export default function UndoToast() {
   const [offer, setOffer] = useState<UndoOffer | null>(null);
   const [isPending, startTransition] = useTransition();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shortcuts = useShortcuts();
 
   useEffect(() => {
     function handleOffer(e: Event) {
@@ -40,25 +42,25 @@ export default function UndoToast() {
     });
   }
 
-  // u: 토스트가 떠 있을 때만 실행취소. 입력 필드에 포커스가 있거나 수정자 키가 눌려있으면 무시.
+  // undo(기본 "u"): 토스트가 떠 있을 때만 실행취소. 입력 필드에 포커스가 있거나 수정자 키가 눌려있으면 무시.
   useEffect(() => {
     if (!offer) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isEditableTarget(e.target)) return;
-      if (e.key !== "u") return;
+      if (!matchesShortcut(e, shortcuts.undo)) return;
       e.preventDefault();
       handleUndo();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offer]);
+  }, [offer, shortcuts]);
 
   if (!offer) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-black/10 bg-white px-4 py-2.5 text-sm shadow-xl dark:border-white/10 dark:bg-zinc-900">
+    <div className="fixed bottom-12 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-black/10 bg-white px-4 py-2.5 text-sm shadow-xl dark:border-white/10 dark:bg-zinc-900">
       <span>{offer.message}</span>
       <button
         type="button"

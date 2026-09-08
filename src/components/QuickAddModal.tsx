@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createTask } from "@/lib/actions/tasks";
 import SmartTitleInput from "@/components/SmartTitleInput";
+import { matchesShortcut, useShortcuts } from "@/lib/shortcuts";
 import type { Project, Tag } from "@/lib/types";
 
 const PRIORITIES = [
@@ -25,8 +26,9 @@ export default function QuickAddModal({ projects, tags }: { projects: Project[];
   const [projectPending, setProjectPending] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const dueDateRef = useRef<HTMLInputElement>(null);
+  const shortcuts = useShortcuts();
 
-  // 전역 단축키: "n" → 팝업 열기 (입력 필드에 포커스 없을 때만), "Esc" → 닫기
+  // 전역 단축키: quickAdd(기본 "n") → 팝업 열기 (입력 필드에 포커스 없을 때만), "Esc" → 닫기
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (open) {
@@ -36,7 +38,13 @@ export default function QuickAddModal({ projects, tags }: { projects: Project[];
         }
         return;
       }
-      if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !isEditableTarget(e.target)) {
+      if (
+        matchesShortcut(e, shortcuts.quickAdd) &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !isEditableTarget(e.target)
+      ) {
         e.preventDefault();
         setInitialDueDate("");
         setOpen(true);
@@ -44,7 +52,7 @@ export default function QuickAddModal({ projects, tags }: { projects: Project[];
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [open, shortcuts]);
 
   // 캘린더 칸을 더블클릭하면(CalendarDayCell) 그 날짜를 마감일로 미리 채운 채 팝업을 연다.
   useEffect(() => {

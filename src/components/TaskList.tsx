@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useOptimistic, useState, useTransition
 import { completeTasks, deleteTasks } from "@/lib/actions/tasks";
 import TaskItem from "@/components/TaskItem";
 import { offerUndo } from "@/lib/undoBus";
+import { matchesShortcut, useShortcuts } from "@/lib/shortcuts";
+import { announceSelectionCount } from "@/lib/selectionCount";
 import type { Project, Tag, TaskWithRelations } from "@/lib/types";
 
 function isEditableTarget(target: EventTarget | null) {
@@ -45,6 +47,7 @@ export default function TaskList({
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
+  const shortcuts = useShortcuts();
 
   // 완료/완료취소/삭제는 전부 "이 태스크가 현재 뷰에서 빠진다"로 귀결된다.
   // (완료 뷰에서는 완료 취소한 것이, 나머지 뷰에서는 완료 처리한 것이 목록을 떠난다.)
@@ -64,6 +67,17 @@ export default function TaskList({
     });
   }, []);
 
+  // 일반 선택(다중 선택 조합키 없이 클릭): 이전 선택은 지우고 이 태스크만 선택한다.
+  const selectOnly = useCallback((id: string) => {
+    setSelectedIds(new Set([id]));
+  }, []);
+
+  // 선택 개수는 더 이상 목록 위 바에 표시하지 않고, 페이지 헤딩 옆 SelectionCountBadge가 보여준다
+  // (단축키 힌트는 화면 하단 ShortcutBar에 항상 떠 있어 여기서 중복 표시할 필요가 없어짐).
+  useEffect(() => {
+    announceSelectionCount(selectedIds.size);
+  }, [selectedIds]);
+
   // d(완료)/Shift+d(완료 취소)/r(삭제)/Esc(선택 해제) 단축키: 선택된 태스크가 있을 때만 동작.
   // 완료·삭제는 체크된 태스크 전체에 일괄 실행(실행 전 확인 1회) — 예전에는 선택한 개수만큼
   // 서버 액션을 각각 호출해 페이지를 그 횟수만큼 다시 그렸지만, 이제 일괄 액션 하나로
@@ -73,15 +87,14 @@ export default function TaskList({
       if (selectedIds.size === 0) return;
       if (isEditableTarget(e.target)) return;
 
-      if (e.key === "Escape") {
+      if (matchesShortcut(e, shortcuts.clearSelection)) {
         setSelectedIds(new Set());
         return;
       }
 
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      if (e.shiftKey) {
-        if (e.key.toLowerCase() !== "d") return;
+      if (matchesShortcut(e, shortcuts.uncomplete)) {
         e.preventDefault();
         const ids = [...selectedIds];
         if (!confirm(`선택한 ${ids.length}개 작업을 완료 취소할까요?`)) return;
@@ -94,9 +107,10 @@ export default function TaskList({
         return;
       }
 
-      if (e.key !== "d" && e.key !== "r") return;
+      const isComplete = matchesShortcut(e, shortcuts.complete);
+      const isDelete = matchesShortcut(e, shortcuts.delete);
+      if (!isComplete && !isDelete) return;
 
-      const isComplete = e.key === "d";
       e.preventDefault();
       const ids = [...selectedIds];
       const verb = isComplete ? "완료 처리" : "삭제";
@@ -115,7 +129,7 @@ export default function TaskList({
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedIds, startTransition, hideTasks]);
+  }, [selectedIds, startTransition, hideTasks, shortcuts]);
 
   // 칸반 3종은 예전에 컬럼마다 tasks 전체를 filter로 훑어서 태스크×컬럼 만큼 비교했다.
   // 한 번만 순회하며 그룹으로 나눠 담고, 입력이 그대로면 다시 계산하지도 않는다.
@@ -158,24 +172,6 @@ export default function TaskList({
     ];
   }, [layout, visibleTasks, projects, tags, priorityColors]);
 
-  const selectionBar = selectedIds.size > 0 && (
-    <div className="flex items-center justify-between gap-2 rounded-lg bg-black/5 px-3 py-2 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-      <span>
-        {selectedIds.size}개 선택됨 · <kbd className="rounded border border-black/20 px-1 dark:border-white/20">d</kbd> 완료 ·{" "}
-        <kbd className="rounded border border-black/20 px-1 dark:border-white/20">⇧d</kbd> 완료 취소 ·{" "}
-        <kbd className="rounded border border-black/20 px-1 dark:border-white/20">r</kbd> 삭제 ·{" "}
-        <kbd className="rounded border border-black/20 px-1 dark:border-white/20">esc</kbd> 선택 해제
-      </span>
-      <button
-        type="button"
-        onClick={() => setSelectedIds(new Set())}
-        className="rounded px-2 py-0.5 text-zinc-500 hover:bg-black/10 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-100"
-      >
-        선택 해제
-      </button>
-    </div>
-  );
-
   const renderTask = (task: TaskWithRelations) => (
     <TaskItem
       key={task.id}
@@ -183,7 +179,9 @@ export default function TaskList({
       projects={projects}
       priorityColors={priorityColors}
       selected={selectedIds.has(task.id)}
+      isSoleSelection={selectedIds.size === 1 && selectedIds.has(task.id)}
       onToggleSelect={toggleSelect}
+      onSelectOnly={selectOnly}
       onLeaveView={hideTasks}
     />
   );
@@ -191,7 +189,6 @@ export default function TaskList({
   if (columns) {
     return (
       <>
-        {selectionBar}
         <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {columns.map((col) => (
             <div
@@ -217,7 +214,6 @@ export default function TaskList({
 
   return (
     <>
-      {selectionBar}
       <ul className="flex flex-col divide-y divide-black/5 dark:divide-white/10">
         {visibleTasks.map(renderTask)}
         {visibleTasks.length === 0 && <li className="py-8 text-center text-sm text-zinc-400">할 일이 없습니다.</li>}

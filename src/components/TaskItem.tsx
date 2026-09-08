@@ -1,8 +1,10 @@
 "use client";
 
-import { memo, useOptimistic, useRef, useState, useTransition } from "react";
+import { memo, useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { createSubtask, deleteTask, moveSubtask, renameTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
+import { DEFAULT_MEMO_EXPANDED, getMemoDefaultExpanded } from "@/lib/memoSettings";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
+import { isModifierPressed, useMultiSelectModifier } from "@/lib/shortcuts";
 import { offerUndo } from "@/lib/undoBus";
 import type { Project, TaskWithRelations } from "@/lib/types";
 
@@ -178,14 +180,21 @@ function TaskItem({
   projects,
   priorityColors = DEFAULT_PRIORITY_COLORS,
   selected = false,
+  isSoleSelection = false,
   onToggleSelect,
+  onSelectOnly,
   onLeaveView,
 }: {
   task: TaskWithRelations;
   projects: Project[];
   priorityColors?: Record<number, string>;
   selected?: boolean;
+  // 현재 선택된 태스크가 이 하나뿐인지 — 본문을 다시 클릭했을 때 편집으로 들어갈지 판단하는 데 쓰인다.
+  isSoleSelection?: boolean;
+  // 다중 선택 조합키(기본 Ctrl)를 누른 채 클릭 — 기존 선택을 유지하며 토글.
   onToggleSelect?: (id: string) => void;
+  // 조합키 없이 클릭(일반 선택) — 기존 선택을 지우고 이 태스크만 선택.
+  onSelectOnly?: (id: string) => void;
   // 완료/완료취소/삭제하면 이 태스크는 현재 뷰의 조건에서 벗어난다.
   // 서버 응답 전에 목록에서 먼저 치워 클릭이 즉시 반영되게 하는 콜백.
   onLeaveView?: (ids: string[]) => void;
@@ -194,6 +203,14 @@ function TaskItem({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isPending, startTransition] = useTransition();
   const editFormRef = useRef<HTMLFormElement>(null);
+  const [memoExpanded, setMemoExpanded] = useState(DEFAULT_MEMO_EXPANDED);
+  const multiSelectModifier = useMultiSelectModifier();
+
+  // 마운트 후에 저장된 기본값을 읽어야 SSR 결과와 하이드레이션이 어긋나지 않는다.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMemoExpanded(getMemoDefaultExpanded());
+  }, []);
 
   function isFormUnchanged(form: HTMLFormElement) {
     const fd = new FormData(form);
@@ -365,6 +382,8 @@ function TaskItem({
     );
   }
 
+  const accentStyle = { "--task-accent": priorityColor(task.priority, priorityColors) } as React.CSSProperties;
+
   return (
     <li
       onDragOver={handleDragOver}
@@ -376,51 +395,93 @@ function TaskItem({
       className={`group py-3 ${isDragOver ? "rounded-lg bg-black/5 dark:bg-white/10" : ""}`}
     >
       <div className="flex items-start gap-3">
-        <button
-          onClick={() => onToggleSelect?.(task.id)}
-          aria-label="선택"
-          aria-pressed={selected}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2"
-          style={{
-            borderColor: priorityColor(task.priority, priorityColors),
-            background: selected ? priorityColor(task.priority, priorityColors) : undefined,
-          }}
-        />
-
         <div
-          className="min-w-0 flex-1 cursor-pointer"
-          onClick={() => {
-            // 클릭한 곳(div)은 포커스를 못 받는 요소라, 다른 태스크가 편집 중이어도
-            // 자동으로 blur가 안 걸린다. 명시적으로 blur를 걸어서 그쪽의 자동저장/취소
-            // 로직(onBlur)이 먼저 돌게 한 다음 이 태스크를 편집 모드로 연다.
-            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-            setEditing(true);
-          }}
+          className="-mx-1 flex min-w-0 flex-1 items-start gap-3 rounded border border-transparent px-1 hover:border-[var(--task-accent)]"
+          style={accentStyle}
         >
-          <p className={`text-sm ${task.completed ? "text-zinc-400 line-through" : ""}`}>{task.title}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-            {task.dueDate && (
-              <span className={isOverdue(task.dueDate, task.completed) ? "font-medium text-red-500" : ""}>
-                {formatDate(task.dueDate)}
-              </span>
-            )}
-            {task.recurrence && <span>↻ {RECURRENCE_LABELS[task.recurrence]}</span>}
-            {task.description && <span title={task.description}>📝</span>}
-            {task.project && (
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: task.project.color ?? "#999" }} />
-                {task.project.name}
-              </span>
-            )}
-            {task.tags.map(({ tag }) => (
-              <span
-                key={tag.id}
-                className="flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 dark:bg-white/10"
+          <button
+            onClick={(e) => {
+              // 다중 선택 조합키(기본 Ctrl)를 누른 채면 기존 선택에 토글, 아니면 이 태스크만 선택.
+              if (isModifierPressed(e, multiSelectModifier)) onToggleSelect?.(task.id);
+              else onSelectOnly?.(task.id);
+            }}
+            aria-label="선택"
+            aria-pressed={selected}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2"
+            style={{
+              borderColor: priorityColor(task.priority, priorityColors),
+              background: selected ? priorityColor(task.priority, priorityColors) : undefined,
+            }}
+          />
+
+          <div
+            className="min-w-0 flex-1 cursor-pointer"
+            onClick={(e) => {
+              if (isModifierPressed(e, multiSelectModifier)) {
+                onToggleSelect?.(task.id);
+                return;
+              }
+              // 이미 이 태스크 하나만 선택된 상태에서 다시 클릭해야 편집 모드로 들어간다.
+              // 그 외(선택 안 됨, 또는 다른 태스크들과 함께 다중 선택된 상태)에는 이 태스크만
+              // 선택한다(이전 선택은 해제) — 일반 선택으로 옮기면 이전 선택이 취소되는 동작.
+              if (isSoleSelection) {
+                // 클릭한 곳(div)은 포커스를 못 받는 요소라, 다른 태스크가 편집 중이어도
+                // 자동으로 blur가 안 걸린다. 명시적으로 blur를 걸어서 그쪽의 자동저장/취소
+                // 로직(onBlur)이 먼저 돌게 한 다음 이 태스크를 편집 모드로 연다.
+                if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+                setEditing(true);
+                return;
+              }
+              onSelectOnly?.(task.id);
+            }}
+          >
+            <p className={`text-sm ${task.completed ? "text-zinc-400 line-through" : ""}`}>{task.title}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              {task.dueDate && (
+                <span className={isOverdue(task.dueDate, task.completed) ? "font-medium text-red-500" : ""}>
+                  {formatDate(task.dueDate)}
+                </span>
+              )}
+              {task.recurrence && <span>↻ {RECURRENCE_LABELS[task.recurrence]}</span>}
+              {task.description && (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMemoExpanded((v) => !v);
+                  }}
+                  title={memoExpanded ? "메모 접기" : task.description}
+                  className="cursor-pointer"
+                >
+                  📝
+                </span>
+              )}
+              {task.project && (
+                <span className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: task.project.color ?? "#999" }} />
+                  {task.project.name}
+                </span>
+              )}
+              {task.tags.map(({ tag }) => (
+                <span
+                  key={tag.id}
+                  className="flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 dark:bg-white/10"
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tag.color ?? "#999" }} />
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+            {task.description && memoExpanded && (
+              <p
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMemoExpanded(false);
+                }}
+                className="mt-1 cursor-pointer whitespace-pre-wrap text-xs text-zinc-500 dark:text-zinc-400"
               >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tag.color ?? "#999" }} />
-                {tag.name}
-              </span>
-            ))}
+                {task.description}
+              </p>
+            )}
           </div>
         </div>
 
