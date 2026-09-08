@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3333",
     "build": "next build",
-    "start": "next start",
-    "serve": "next build && next start",
+    "start": "next start -p 3333",
+    "serve": "next build && next start -p 3333",
     "lint": "eslint",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/hooks.mjs --test \"tests/unit/**/*.test.ts\" \"tests/actions/**/*.test.ts\"",
     "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/helpers/hooks.mjs --test \"tests/unit/**/*.test.ts\"",

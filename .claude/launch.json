@@ -5,7 +5,7 @@
       "name": "mytodo-dev",
       "runtimeExecutable": "C:\\git\\mytodo\\dev.cmd",
       "runtimeArgs": [],
-      "port": 3000
+      "port": 3333
     }
   ]
 }
