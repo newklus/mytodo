@@ -41,6 +41,8 @@ export default function Sidebar({
   activeProjectId,
   isReportPage = false,
   isCalendarPage = false,
+  calendarMonth,
+  calendarDate,
 }: {
   projects: Project[];
   tags?: Tag[];
@@ -49,6 +51,8 @@ export default function Sidebar({
   activeProjectId?: string;
   isReportPage?: boolean;
   isCalendarPage?: boolean;
+  calendarMonth?: string;
+  calendarDate?: string;
 }) {
   const router = useRouter();
   const [width, setWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -155,7 +159,11 @@ export default function Sidebar({
         <ul className="flex flex-col gap-1">
           <li>
             <Link
-              href={{ pathname: "/", query: { view: activeView ?? "today" } }}
+              href={
+                isCalendarPage
+                  ? { pathname: "/calendar", query: { ...(calendarMonth ? { month: calendarMonth } : {}), ...(calendarDate ? { date: calendarDate } : {}) } }
+                  : { pathname: "/", query: { view: activeView ?? "today" } }
+              }
               className={`block rounded px-3 py-1.5 text-sm ${
                 !activeProjectId ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/5 dark:hover:bg-white/10"
               }`}
@@ -166,7 +174,14 @@ export default function Sidebar({
           {projects.map((p) => (
             <li key={p.id}>
               <Link
-                href={{ pathname: "/", query: { view: activeView ?? "today", project: p.id } }}
+                href={
+                  isCalendarPage
+                    ? {
+                        pathname: "/calendar",
+                        query: { ...(calendarMonth ? { month: calendarMonth } : {}), ...(calendarDate ? { date: calendarDate } : {}), project: p.id },
+                      }
+                    : { pathname: "/", query: { view: activeView ?? "today", project: p.id } }
+                }
                 className={`flex items-center gap-2 truncate rounded px-3 py-1.5 text-sm ${
                   activeProjectId === p.id ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/5 dark:hover:bg-white/10"
                 }`}

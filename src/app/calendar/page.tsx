@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import CalendarDayCell from "@/components/CalendarDayCell";
 import CalendarSplit from "@/components/CalendarSplit";
 import CollapsibleSection from "@/components/CollapsibleSection";
+import PaginatedTaskList from "@/components/PaginatedTaskList";
 import QuickAddModal from "@/components/QuickAddModal";
 import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
@@ -39,10 +40,11 @@ function monthParam(year: number, month: number) {
 export default async function CalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; date?: string }>;
+  searchParams: Promise<{ month?: string; date?: string; project?: string }>;
 }) {
   const params = await searchParams;
   const { year, month } = parseMonthParam(params.month);
+  const projectId = params.project;
 
   const firstOfMonth = new Date(year, month, 1);
   const firstWeekday = firstOfMonth.getDay();
@@ -68,6 +70,7 @@ export default async function CalendarPage({
         parentId: null,
         completed: false,
         dueDate: { gte: gridStart, lte: gridEnd },
+        ...(projectId ? { projectId } : {}),
       },
       include: {
         project: true,
@@ -78,7 +81,7 @@ export default async function CalendarPage({
     }),
     // 마감일이 없는 태스크는 어느 달을 보고 있든 그리드에 걸릴 일이 없으니 달 범위와 무관하게 항상 조회한다.
     prisma.task.findMany({
-      where: { parentId: null, completed: false, dueDate: null },
+      where: { parentId: null, completed: false, dueDate: null, ...(projectId ? { projectId } : {}) },
       include: {
         project: true,
         subtasks: { orderBy: { createdAt: "asc" } },
@@ -119,7 +122,15 @@ export default async function CalendarPage({
 
   return (
     <div className="flex flex-1 min-h-0">
-      <Sidebar projects={projects} tags={tags} priorityColors={priorityColors} isCalendarPage />
+      <Sidebar
+        projects={projects}
+        tags={tags}
+        priorityColors={priorityColors}
+        isCalendarPage
+        activeProjectId={projectId}
+        calendarMonth={currentMonthParam}
+        calendarDate={selectedKey}
+      />
 
       <main className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
         <div className="flex items-center gap-3">
@@ -200,7 +211,7 @@ export default async function CalendarPage({
             className="border-t border-black/10 pt-4 dark:border-white/10"
           >
             <div className="mt-3">
-              <TaskList tasks={unscheduledTasks} projects={projects} tags={tags} priorityColors={priorityColors} layout="list" />
+              <PaginatedTaskList tasks={unscheduledTasks} projects={projects} tags={tags} priorityColors={priorityColors} />
             </div>
           </CollapsibleSection>
         )}
