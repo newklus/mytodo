@@ -15,19 +15,15 @@ const PRIORITIES = [
 export default function QuickAddForm({
   projects,
   tags,
-  defaultProjectId,
 }: {
   projects: Project[];
   tags: Tag[];
-  defaultProjectId?: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const dueDateRef = useRef<HTMLInputElement>(null);
   const [isPending, startTransition] = useTransition();
   const [resetKey, setResetKey] = useState(0);
   const [projectPending, setProjectPending] = useState(false);
-
-  const defaultProject = projects.find((p) => p.id === defaultProjectId) ?? null;
 
   return (
     <form
@@ -45,7 +41,6 @@ export default function QuickAddForm({
         key={resetKey}
         projects={projects}
         tags={tags}
-        defaultProject={defaultProject}
         onPendingChange={setProjectPending}
         onDueDateResolved={(date) => {
           if (dueDateRef.current) dueDateRef.current.value = date;

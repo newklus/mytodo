@@ -43,6 +43,23 @@ const VIEW_LABELS: Record<View, string> = {
   completed: "완료",
 };
 
+function ProjectFilterCheck() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      className="h-3.5 w-3.5 shrink-0 text-zinc-400 dark:text-zinc-500"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 10.5l3.5 3.5L16 6" />
+    </svg>
+  );
+}
+
 export default function Sidebar({
   projects,
   tags = [],
@@ -196,11 +213,12 @@ export default function Sidebar({
                   ? { pathname: "/calendar", query: { ...(calendarMonth ? { month: calendarMonth } : {}), ...(calendarDate ? { date: calendarDate } : {}) } }
                   : { pathname: "/", query: { view: activeView ?? "today" } }
               }
-              className={`block rounded px-3 py-1.5 text-sm ${
+              className={`flex items-center justify-between gap-2 rounded px-3 py-1.5 text-sm ${
                 !activeProjectId ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/5 dark:hover:bg-white/10"
               }`}
             >
-              전체 프로젝트
+              <span className="truncate">전체 프로젝트</span>
+              {!activeProjectId && <ProjectFilterCheck />}
             </Link>
           </li>
           {projects.map((p) => (
@@ -214,12 +232,13 @@ export default function Sidebar({
                       }
                     : { pathname: "/", query: { view: activeView ?? "today", project: p.id } }
                 }
-                className={`flex items-center gap-2 truncate rounded px-3 py-1.5 text-sm ${
+                className={`flex items-center gap-2 rounded px-3 py-1.5 text-sm ${
                   activeProjectId === p.id ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/5 dark:hover:bg-white/10"
                 }`}
               >
                 <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: p.color ?? "#999" }} />
-                <span className="truncate">{p.name}</span>
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                {activeProjectId === p.id && <ProjectFilterCheck />}
               </Link>
             </li>
           ))}

@@ -162,7 +162,7 @@ export default async function Home({
           </div>
         </div>
 
-        <QuickAddForm projects={projects} tags={tags} defaultProjectId={projectId} />
+        <QuickAddForm projects={projects} tags={tags} />
 
         <TaskList tasks={tasks} projects={projects} tags={tags} priorityColors={priorityColors} layout={layout} />
 

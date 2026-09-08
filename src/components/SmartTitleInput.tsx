@@ -43,7 +43,6 @@ function parseAllMentions(rawText: string): { title: string; projectQuery: strin
 export default function SmartTitleInput({
   projects,
   tags,
-  defaultProject = null,
   placeholder = "할 일 추가... (@프로젝트, #태그, +N일)",
   autoFocus = false,
   className = "",
@@ -52,7 +51,6 @@ export default function SmartTitleInput({
 }: {
   projects: Project[];
   tags: Tag[];
-  defaultProject?: Project | null;
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
@@ -65,7 +63,7 @@ export default function SmartTitleInput({
   const [cursorPos, setCursorPos] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [selectedProject, setSelectedProject] = useState<{ id: string | null; name: string; color: string | null; pending?: boolean } | null>(
-    defaultProject ? { id: defaultProject.id, name: defaultProject.name, color: defaultProject.color } : null,
+    null,
   );
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState(false);
