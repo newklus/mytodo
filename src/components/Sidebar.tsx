@@ -21,6 +21,7 @@ export default function Sidebar({
   activeView,
   activeProjectId,
   isReportPage = false,
+  isCalendarPage = false,
 }: {
   projects: Project[];
   tags?: Tag[];
@@ -28,6 +29,7 @@ export default function Sidebar({
   activeView?: View;
   activeProjectId?: string;
   isReportPage?: boolean;
+  isCalendarPage?: boolean;
 }) {
   return (
     <aside className="flex w-56 shrink-0 flex-col gap-6 border-r border-black/10 p-4 dark:border-white/10">
@@ -37,7 +39,7 @@ export default function Sidebar({
             key={v}
             href={{ pathname: "/", query: { view: v, ...(activeProjectId ? { project: activeProjectId } : {}) } }}
             className={`rounded px-3 py-1.5 text-sm ${
-              !isReportPage && activeView === v
+              !isReportPage && !isCalendarPage && activeView === v
                 ? "bg-black text-white dark:bg-white dark:text-black"
                 : "hover:bg-black/5 dark:hover:bg-white/10"
             }`}
@@ -45,16 +47,28 @@ export default function Sidebar({
             {VIEW_LABELS[v]}
           </Link>
         ))}
-        <Link
-          href="/report"
-          className={`mt-1 rounded border-t border-black/10 px-3 pb-1 pt-2 text-sm dark:border-white/10 ${
-            isReportPage
-              ? "bg-black text-white dark:bg-white dark:text-black"
-              : "hover:bg-black/5 dark:hover:bg-white/10"
-          }`}
-        >
-          주간보고
-        </Link>
+        <div className="mt-1 flex flex-col gap-1 border-t border-black/10 pt-2 dark:border-white/10">
+          <Link
+            href="/calendar"
+            className={`rounded px-3 py-1.5 text-sm ${
+              isCalendarPage
+                ? "bg-black text-white dark:bg-white dark:text-black"
+                : "hover:bg-black/5 dark:hover:bg-white/10"
+            }`}
+          >
+            캘린더
+          </Link>
+          <Link
+            href="/report"
+            className={`rounded px-3 py-1.5 text-sm ${
+              isReportPage
+                ? "bg-black text-white dark:bg-white dark:text-black"
+                : "hover:bg-black/5 dark:hover:bg-white/10"
+            }`}
+          >
+            주간보고
+          </Link>
+        </div>
       </nav>
 
       <div>

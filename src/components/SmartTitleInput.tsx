@@ -183,8 +183,10 @@ export default function SmartTitleInput({
         setHighlight((h) => Math.max(h - 1, 0));
         return;
       }
-      if (e.key === "Tab") {
-        // Tab은 드롭다운에서 강조된 항목 하나만 콕 집어 고르는 용도로 남겨둔다.
+      if (e.key === "Tab" || e.key === "Enter") {
+        // 드롭다운이 떠 있는 동안은 Tab과 Enter를 동일하게 취급 — 강조된 항목을 그대로 선택한다.
+        // (부분 입력 상태에서 Enter가 완전일치만 인정해 별개의 새 항목을 만들어버리던 문제 수정.
+        //  스페이스를 눌러 드롭다운이 닫힌 뒤에 누르는 Enter는 아래 resolveAllMentions로 그대로 빠진다.)
         e.preventDefault();
         selectSuggestion(suggestions[highlight]);
         return;

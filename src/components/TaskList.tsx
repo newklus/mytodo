@@ -69,7 +69,8 @@ export default function TaskList({
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (selectedIds.size === 0) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // Shift+D/R은 나중에 별도 기능으로 쓸 수 있도록 지금은 예약해두고 막는다.
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (isEditableTarget(e.target)) return;
       if (e.key !== "d" && e.key !== "r") return;
 

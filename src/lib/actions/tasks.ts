@@ -33,7 +33,15 @@ function nextDueDate(from: Date, recurrence: string): Date {
   const next = new Date(from);
   if (recurrence === "DAILY") next.setDate(next.getDate() + 1);
   else if (recurrence === "WEEKLY") next.setDate(next.getDate() + 7);
-  else if (recurrence === "MONTHLY") next.setMonth(next.getMonth() + 1);
+  else if (recurrence === "MONTHLY") {
+    // setMonth()를 그대로 쓰면 1/31 + 1개월처럼 대상 월에 없는 날짜(2/31)가
+    // 다음 달로 오버플로된다(→ 3/3). 일(day)을 대상 월의 말일로 클램프해서 방지.
+    const day = next.getDate();
+    next.setDate(1);
+    next.setMonth(next.getMonth() + 1);
+    const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    next.setDate(Math.min(day, lastDayOfTargetMonth));
+  }
   return next;
 }
 
