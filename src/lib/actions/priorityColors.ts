@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 
 export async function updatePriorityColor(priority: number, color: string) {
   await prisma.priorityColor.upsert({
@@ -9,5 +9,5 @@ export async function updatePriorityColor(priority: number, color: string) {
     update: { color },
     create: { priority, color },
   });
-  revalidatePath("/");
+  refresh();
 }

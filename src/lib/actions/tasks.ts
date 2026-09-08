@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { randomColor } from "@/lib/colors";
 import { findOrCreateProject } from "@/lib/actions/projects";
 import { parsePlusDate } from "@/lib/plusDate";
@@ -97,14 +97,17 @@ export async function createTask(formData: FormData) {
     },
   });
 
-  revalidatePath("/");
+  refresh();
 }
 
 export async function createSubtask(parentId: string, formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
 
-  const parent = await prisma.task.findUnique({ where: { id: parentId } });
+  const parent = await prisma.task.findUnique({
+    where: { id: parentId },
+    select: { projectId: true },
+  });
   if (!parent) return;
 
   await prisma.task.create({
@@ -115,7 +118,7 @@ export async function createSubtask(parentId: string, formData: FormData) {
     },
   });
 
-  revalidatePath("/");
+  refresh();
 }
 
 export async function updateTask(formData: FormData) {
@@ -131,7 +134,10 @@ export async function updateTask(formData: FormData) {
   const recurrence = formData.get("recurrence");
   const tagNames = parseTagNames(formData.get("tags"));
 
-  const before = await prisma.task.findUnique({ where: { id }, include: { tags: true } });
+  const before = await prisma.task.findUnique({
+    where: { id },
+    select: { projectId: true, tags: { select: { tagId: true } } },
+  });
 
   await prisma.task.update({
     where: { id },
@@ -150,61 +156,108 @@ export async function updateTask(formData: FormData) {
   });
 
   if (before) {
-    await cleanupUnusedProjectAndTags(before.projectId, before.tags.map((t) => t.tagId));
+    await cleanupUnusedProjectAndTags(
+      before.projectId ? [before.projectId] : [],
+      before.tags.map((t) => t.tagId)
+    );
   }
 
-  revalidatePath("/");
+  refresh();
 }
 
-export async function toggleTaskComplete(id: string, completed: boolean) {
-  const task = await prisma.task.update({
-    where: { id },
-    data: {
-      completed,
-      completedAt: completed ? new Date() : null,
+// 반복 태스크의 다음 회차 생성까지 포함해 완료 상태를 뒤집는다.
+// 여러 건을 한 번에 처리해도 DB 왕복과 화면 갱신은 각각 한 번만 일어난다.
+async function applyComplete(ids: string[], completed: boolean) {
+  if (ids.length === 0) return;
+
+  const completedAt = completed ? new Date() : null;
+  const tasks = await prisma.task.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      dueDate: true,
+      priority: true,
+      recurrence: true,
+      projectId: true,
     },
   });
 
-  if (completed && task.recurrence && task.dueDate) {
-    await prisma.task.create({
-      data: {
-        title: task.title,
-        description: task.description,
-        dueDate: nextDueDate(task.dueDate, task.recurrence),
-        priority: task.priority,
-        recurrence: task.recurrence,
-        projectId: task.projectId,
-      },
-    });
-  }
+  const recurringNext = completed
+    ? tasks
+        .filter((t) => t.recurrence && t.dueDate)
+        .map((t) => ({
+          title: t.title,
+          description: t.description,
+          dueDate: nextDueDate(t.dueDate!, t.recurrence!),
+          priority: t.priority,
+          recurrence: t.recurrence,
+          projectId: t.projectId,
+        }))
+    : [];
 
-  revalidatePath("/");
+  // 상태 변경과 다음 회차 생성을 한 트랜잭션(=커밋 1회)으로 묶는다.
+  await prisma.$transaction([
+    prisma.task.updateMany({ where: { id: { in: ids } }, data: { completed, completedAt } }),
+    ...recurringNext.map((data) => prisma.task.create({ data })),
+  ]);
+}
+
+export async function toggleTaskComplete(id: string, completed: boolean) {
+  await applyComplete([id], completed);
+  refresh();
+}
+
+// 다중 선택 후 d 단축키: 예전에는 태스크 수만큼 서버 액션을 각각 호출해
+// 매번 페이지 전체를 다시 그렸다. 이제 왕복 1회 · 화면 갱신 1회로 끝난다.
+export async function completeTasks(ids: string[], completed: boolean) {
+  await applyComplete(ids, completed);
+  refresh();
+}
+
+async function applyDelete(ids: string[]) {
+  if (ids.length === 0) return;
+
+  const tasks = await prisma.task.findMany({
+    where: { id: { in: ids } },
+    select: { projectId: true, tags: { select: { tagId: true } } },
+  });
+  if (tasks.length === 0) return;
+
+  await prisma.task.deleteMany({ where: { id: { in: ids } } });
+
+  const projectIds = [...new Set(tasks.map((t) => t.projectId).filter((p): p is string => !!p))];
+  const tagIds = [...new Set(tasks.flatMap((t) => t.tags.map((tag) => tag.tagId)))];
+  await cleanupUnusedProjectAndTags(projectIds, tagIds);
 }
 
 export async function deleteTask(id: string) {
-  const task = await prisma.task.findUnique({ where: { id }, include: { tags: true } });
-  await prisma.task.delete({ where: { id } });
-  if (task) {
-    await cleanupUnusedProjectAndTags(task.projectId, task.tags.map((t) => t.tagId));
-  }
-  revalidatePath("/");
+  await applyDelete([id]);
+  refresh();
+}
+
+// 다중 선택 후 r 단축키: completeTasks 와 같은 이유로 일괄 처리한다.
+export async function deleteTasks(ids: string[]) {
+  await applyDelete(ids);
+  refresh();
 }
 
 export async function renameTask(id: string, title: string) {
   const trimmed = title.trim();
   if (!trimmed) return;
   await prisma.task.update({ where: { id }, data: { title: trimmed } });
-  revalidatePath("/");
+  refresh();
 }
 
 export async function moveSubtask(subtaskId: string, newParentId: string) {
   if (subtaskId === newParentId) return;
 
-  const newParent = await prisma.task.findUnique({ where: { id: newParentId } });
-  if (!newParent) return;
-
-  const subtask = await prisma.task.findUnique({ where: { id: subtaskId } });
-  if (!subtask) return;
+  const [newParent, subtask] = await Promise.all([
+    prisma.task.findUnique({ where: { id: newParentId }, select: { projectId: true } }),
+    prisma.task.findUnique({ where: { id: subtaskId }, select: { projectId: true } }),
+  ]);
+  if (!newParent || !subtask) return;
 
   await prisma.task.update({
     where: { id: subtaskId },
@@ -212,8 +265,8 @@ export async function moveSubtask(subtaskId: string, newParentId: string) {
   });
 
   if (subtask.projectId && subtask.projectId !== newParent.projectId) {
-    await cleanupUnusedProjectAndTags(subtask.projectId, []);
+    await cleanupUnusedProjectAndTags([subtask.projectId], []);
   }
 
-  revalidatePath("/");
+  refresh();
 }

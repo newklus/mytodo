@@ -41,10 +41,6 @@ export default async function Home({
   const validLayouts: Layout[] = ["list", "priority", "project", "tag"];
   const layout: Layout = validLayouts.includes(params.layout as Layout) ? (params.layout as Layout) : "list";
 
-  const projects = await prisma.project.findMany({ orderBy: { createdAt: "asc" } });
-  const tags = await prisma.tag.findMany({ orderBy: { name: "asc" } });
-  const priorityColors = await getPriorityColors();
-
   const where: Prisma.TaskWhereInput = {
     parentId: null,
     ...(projectId ? { projectId } : {}),
@@ -68,15 +64,21 @@ export default async function Home({
       ? [{ dueDate: { sort: "asc", nulls: "last" } }, { priority: "asc" }, { createdAt: "asc" }]
       : [{ priority: "asc" }, { dueDate: "asc" }, { createdAt: "asc" }];
 
-  const tasks = await prisma.task.findMany({
-    where,
-    include: {
-      project: true,
-      subtasks: { orderBy: { createdAt: "asc" } },
-      tags: { include: { tag: true } },
-    },
-    orderBy,
-  });
+  // 네 쿼리는 서로 의존하지 않으므로 순차로 await 하지 않고 한꺼번에 보낸다.
+  const [projects, tags, priorityColors, tasks] = await Promise.all([
+    prisma.project.findMany({ orderBy: { createdAt: "asc" } }),
+    prisma.tag.findMany({ orderBy: { name: "asc" } }),
+    getPriorityColors(),
+    prisma.task.findMany({
+      where,
+      include: {
+        project: true,
+        subtasks: { orderBy: { createdAt: "asc" } },
+        tags: { include: { tag: true } },
+      },
+      orderBy,
+    }),
+  ]);
 
   return (
     <div className="flex flex-1 min-h-0">

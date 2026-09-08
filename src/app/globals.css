@@ -8,8 +8,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* body가 아래에서 Arial 스택으로 덮어쓰고 있어 Geist 웹폰트는 한 번도 렌더에 쓰이지 않았다.
+     다운로드만 하고 버리던 폰트 2종을 걷어내고 시스템 폰트 스택으로 맞춘다 (화면은 그대로). */
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {

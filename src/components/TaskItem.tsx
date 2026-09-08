@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { memo, useOptimistic, useRef, useState, useTransition } from "react";
 import { createSubtask, deleteTask, moveSubtask, renameTask, toggleTaskComplete, updateTask } from "@/lib/actions/tasks";
 import { DEFAULT_PRIORITY_COLORS } from "@/lib/priorityColors";
 import type { Project, TaskWithRelations } from "@/lib/types";
@@ -46,6 +46,10 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
   const [isPending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(subtask.title);
+  // 서버 왕복을 기다리지 않고 체크 표시를 먼저 바꾼다.
+  const [completed, setCompletedOptimistic] = useOptimistic(subtask.completed);
+  // 삭제도 마찬가지 — 응답 전에 행을 먼저 지운다.
+  const [removed, markRemoved] = useOptimistic(false, () => true);
 
   function commitRename() {
     setEditing(false);
@@ -58,6 +62,8 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
       await renameTask(subtask.id, trimmed);
     });
   }
+
+  if (removed) return null;
 
   return (
     <li className="flex items-center gap-2 py-1">
@@ -73,11 +79,16 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
         ⠿
       </span>
       <button
-        onClick={() => startTransition(async () => toggleTaskComplete(subtask.id, !subtask.completed))}
+        onClick={() =>
+          startTransition(async () => {
+            setCompletedOptimistic(!completed);
+            await toggleTaskComplete(subtask.id, !completed);
+          })
+        }
         disabled={isPending}
         aria-label="완료 토글"
         className={`h-3 w-3 shrink-0 rounded-full border-2 ${
-          subtask.completed ? "border-zinc-400 bg-zinc-400" : "border-zinc-400"
+          completed ? "border-zinc-400 bg-zinc-400" : "border-zinc-400"
         }`}
       />
       {editing ? (
@@ -101,13 +112,18 @@ function SubtaskRow({ subtask }: { subtask: TaskWithRelations["subtasks"][number
             if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
             setEditing(true);
           }}
-          className={`flex-1 cursor-text text-xs ${subtask.completed ? "text-zinc-400 line-through" : ""}`}
+          className={`flex-1 cursor-text text-xs ${completed ? "text-zinc-400 line-through" : ""}`}
         >
           {subtask.title}
         </span>
       )}
       <button
-        onClick={() => startTransition(async () => deleteTask(subtask.id))}
+        onClick={() =>
+          startTransition(async () => {
+            markRemoved(null);
+            await deleteTask(subtask.id);
+          })
+        }
         disabled={isPending}
         className="text-xs text-zinc-300 hover:text-red-500"
       >
@@ -149,18 +165,22 @@ function AddSubtaskForm({ parentId }: { parentId: string }) {
   );
 }
 
-export default function TaskItem({
+function TaskItem({
   task,
   projects,
   priorityColors = DEFAULT_PRIORITY_COLORS,
   selected = false,
   onToggleSelect,
+  onLeaveView,
 }: {
   task: TaskWithRelations;
   projects: Project[];
   priorityColors?: Record<number, string>;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
+  // 완료/완료취소/삭제하면 이 태스크는 현재 뷰의 조건에서 벗어난다.
+  // 서버 응답 전에 목록에서 먼저 치워 클릭이 즉시 반영되게 하는 콜백.
+  onLeaveView?: (ids: string[]) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -218,6 +238,7 @@ export default function TaskItem({
     const verb = task.completed ? "완료를 취소" : "완료 처리";
     if (!confirm(`"${task.title}"을(를) ${verb}할까요?`)) return;
     startTransition(async () => {
+      onLeaveView?.([task.id]);
       await toggleTaskComplete(task.id, !task.completed);
     });
   }
@@ -225,6 +246,7 @@ export default function TaskItem({
   function handleDelete() {
     if (!confirm(`"${task.title}"을(를) 삭제할까요?`)) return;
     startTransition(async () => {
+      onLeaveView?.([task.id]);
       await deleteTask(task.id);
     });
   }
@@ -420,3 +442,7 @@ export default function TaskItem({
     </li>
   );
 }
+
+// 태스크를 하나 선택하면 목록 전체가 다시 렌더된다. 실제로 달라지는 건 그 행뿐이라
+// props가 그대로인 행은 렌더를 건너뛴다 (TaskList가 콜백을 안정적으로 넘겨주고 있다).
+export default memo(TaskItem);

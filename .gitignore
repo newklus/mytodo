@@ -36,6 +36,9 @@ yarn-error.log*
 # database
 /dev.db
 /dev.db-journal
+# WAL 모드에서 생기는 사이드카 파일
+/dev.db-wal
+/dev.db-shm
 
 # vercel
 .vercel

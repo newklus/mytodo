@@ -49,6 +49,15 @@ model Task {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 목록 4개 뷰(전체/오늘/예정/완료)가 전부 "parentId IS NULL + completed" 로 시작하고
+  // 그다음 dueDate 로 정렬하므로 이 순서의 복합 인덱스 하나로 모두 커버된다.
+  @@index([parentId, completed, dueDate])
+  // 부모별 서브태스크 로딩(include: subtasks)과 프로젝트 필터/자동정리 카운트용
+  @@index([parentId])
+  @@index([projectId])
+  // 주간보고의 완료 기간 조회용
+  @@index([completed, completedAt])
 }
 
 model TaskTag {
@@ -58,6 +67,9 @@ model TaskTag {
   tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([taskId, tagId])
+  // 복합 PK의 선두 컬럼이 taskId 라서 tagId 단독 조회(태그 자동정리 카운트, 태그별 칸반)는
+  // 인덱스를 못 타고 전체 스캔이 된다. 그래서 tagId 인덱스를 따로 둔다.
+  @@index([tagId])
 }
 
 model PriorityColor {

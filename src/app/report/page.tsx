@@ -20,11 +20,11 @@ export default async function ReportPage({
   const nextWeek = new Date(start);
   nextWeek.setDate(nextWeek.getDate() + 7);
 
-  const projects = await prisma.project.findMany({ orderBy: { createdAt: "asc" } });
-  const tags = await prisma.tag.findMany({ orderBy: { name: "asc" } });
-  const priorityColors = await getPriorityColors();
-
-  const [completedTasks, completedSubtasks, progressTasks] = await Promise.all([
+  // 사이드바용 쿼리도 보고서 쿼리와 함께 한꺼번에 보낸다 (서로 의존하지 않음).
+  const [projects, tags, priorityColors, completedTasks, completedSubtasks, progressTasks] = await Promise.all([
+    prisma.project.findMany({ orderBy: { createdAt: "asc" } }),
+    prisma.tag.findMany({ orderBy: { name: "asc" } }),
+    getPriorityColors(),
     prisma.task.findMany({
       where: {
         parentId: null,
